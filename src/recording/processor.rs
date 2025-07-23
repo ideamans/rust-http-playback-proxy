@@ -8,6 +8,7 @@ use crate::types::{Resource, ContentEncodingType};
 use crate::utils::{is_text_resource, extract_charset_from_content_type, generate_file_path_from_url};
 use crate::traits::{FileSystem, TimeProvider};
 
+#[allow(dead_code)]
 pub struct RequestProcessor<F: FileSystem, T: TimeProvider> {
     inventory_dir: PathBuf,
     contents_dir: PathBuf,

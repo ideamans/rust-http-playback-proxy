@@ -21,6 +21,7 @@ pub fn get_port_or_default(port: Option<u16>) -> Result<u16> {
     }
 }
 
+#[allow(dead_code)]
 pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
     let parsed_url = Url::parse(url)?;
     let scheme = parsed_url.scheme();
@@ -85,6 +86,7 @@ pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
     Ok(file_path)
 }
 
+#[allow(dead_code)]
 pub fn is_text_resource(content_type: &str) -> bool {
     let content_type = content_type.to_lowercase();
     content_type.starts_with("text/html") ||
@@ -93,6 +95,7 @@ pub fn is_text_resource(content_type: &str) -> bool {
     content_type.starts_with("text/javascript")
 }
 
+#[allow(dead_code)]
 pub fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
     if let Some(charset_pos) = content_type.to_lowercase().find("charset=") {
         let charset_start = charset_pos + 8;

@@ -4,6 +4,7 @@ use std::path::Path;
 
 /// HTTP client abstraction for making requests
 #[async_trait]
+#[allow(dead_code)]
 pub trait HttpClient: Send + Sync {
     async fn request(
         &self,
@@ -16,6 +17,7 @@ pub trait HttpClient: Send + Sync {
 
 /// HTTP response abstraction
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct HttpResponse {
     pub status_code: u16,
     pub headers: std::collections::HashMap<String, String>,
@@ -35,12 +37,14 @@ pub trait FileSystem: Send + Sync {
 }
 
 /// Time abstraction for testing timing behavior
+#[allow(dead_code)]
 pub trait TimeProvider: Send + Sync {
     fn now_ms(&self) -> u64;
     fn elapsed_since(&self, start: u64) -> u64;
 }
 
 /// Port finder abstraction
+#[allow(dead_code)]
 pub trait PortFinder: Send + Sync {
     fn find_available_port(&self, start_port: u16) -> Result<u16>;
 }
@@ -149,6 +153,7 @@ pub mod mocks {
         requests: Arc<Mutex<Vec<(String, String)>>>, // (method, url)
     }
 
+    #[allow(dead_code)]
     impl MockHttpClient {
         pub fn new() -> Self {
             Self {
@@ -197,6 +202,7 @@ pub mod mocks {
         directories: Arc<Mutex<std::collections::HashSet<String>>>,
     }
 
+    #[allow(dead_code)]
     impl MockFileSystem {
         pub fn new() -> Self {
             Self {
@@ -267,6 +273,7 @@ pub mod mocks {
         current_time: Arc<Mutex<u64>>,
     }
 
+    #[allow(dead_code)]
     impl MockTimeProvider {
         pub fn new(initial_time: u64) -> Self {
             Self {
@@ -299,6 +306,7 @@ pub mod mocks {
         available_port: u16,
     }
 
+    #[allow(dead_code)]
     impl MockPortFinder {
         pub fn new(port: u16) -> Self {
             Self {

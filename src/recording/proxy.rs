@@ -13,6 +13,7 @@ use std::time::Instant;
 use tracing::{info, error, debug};
 
 use crate::types::{Inventory, Resource};
+use serde::Serialize;
 use super::processor::RequestProcessor;
 
 pub async fn start_recording_proxy(
@@ -149,7 +150,12 @@ pub async fn save_inventory_with_fs<F: FileSystem>(
     file_system.create_dir_all(inventory_dir).await?;
     
     let inventory_path = inventory_dir.join("inventory.json");
-    let inventory_json = serde_json::to_string_pretty(inventory)?;
+    // 2スペースインデントで整形
+    let mut buf = Vec::new();
+    let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
+    let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+    inventory.serialize(&mut ser)?;
+    let inventory_json = String::from_utf8(buf)?;
     
     file_system.write_string(&inventory_path, &inventory_json).await?;
     

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::types::{DeviceType, Inventory, Resource, ContentEncodingType};
+use serde::Serialize;
     use tempfile::TempDir;
     use tokio;
 
@@ -23,7 +24,12 @@ mod tests {
         // Save the inventory
         tokio::fs::create_dir_all(&inventory_dir).await.unwrap();
         let inventory_path = inventory_dir.join("inventory.json");
-        let inventory_json = serde_json::to_string_pretty(&inventory).unwrap();
+        // 2スペースインデントで整形
+        let mut buf = Vec::new();
+        let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
+        let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+        inventory.serialize(&mut ser).unwrap();
+        let inventory_json = String::from_utf8(buf).unwrap();
         tokio::fs::write(&inventory_path, inventory_json).await.unwrap();
         
         // Test loading

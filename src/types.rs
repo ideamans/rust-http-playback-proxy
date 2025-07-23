@@ -78,6 +78,7 @@ pub struct Inventory {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct BodyChunk {
     pub chunk: Vec<u8>,
     pub target_time: u64,

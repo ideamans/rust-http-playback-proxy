@@ -4,9 +4,11 @@ mod tests {
                is_text_resource, extract_charset_from_content_type};
 
     #[test]
+    #[allow(unused_comparisons)]
     fn test_find_available_port() {
         let port = find_available_port(8080).unwrap();
         assert!(port >= 8080);
+        // u16の最大値は65535なので、この比較は常にtrueになるが意図的に残す
         assert!(port <= 65535);
     }
 

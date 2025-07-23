@@ -2,6 +2,7 @@
 mod tests {
     use crate::types::{ContentEncodingType, DeviceType, Resource, Inventory, BodyChunk, Transaction};
     use serde_json;
+use serde::Serialize;
     use std::str::FromStr;
 
     #[test]
@@ -86,7 +87,12 @@ mod tests {
         let resource = Resource::new("GET".to_string(), "https://example.com".to_string());
         inventory.resources.push(resource);
         
-        let json = serde_json::to_string_pretty(&inventory).unwrap();
+        // 2スペースインデントで整形
+        let mut buf = Vec::new();
+        let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
+        let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
+        inventory.serialize(&mut ser).unwrap();
+        let json = String::from_utf8(buf).unwrap();
         assert!(json.contains("\"entryUrl\""));
         assert!(json.contains("\"deviceType\""));
         assert!(json.contains("\"resources\""));

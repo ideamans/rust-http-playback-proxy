@@ -122,6 +122,9 @@ mod tests {
         assert!(json_str.contains("POST"));
         assert!(json_str.contains("201"));
         assert!(json_str.contains("75"));
+        
+        // Verify 2-space indentation
+        assert!(json_str.contains("{\n  \"entryUrl\""));
     }
 
     #[tokio::test]
@@ -197,5 +200,46 @@ mod tests {
         assert!(loaded_resource.raw_headers.is_some());
         assert_eq!(loaded_resource.content_encoding, Some(crate::types::ContentEncodingType::Gzip));
         assert_eq!(loaded_resource.minify, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_json_indentation_format() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+        
+        let mock_fs = Arc::new(MockFileSystem::new());
+        
+        let mut inventory = Inventory::new();
+        inventory.entry_url = Some("https://example.com".to_string());
+        inventory.device_type = Some(DeviceType::Desktop);
+        
+        let mut resource = Resource::new("GET".to_string(), "https://example.com/api".to_string());
+        resource.status_code = Some(200);
+        resource.ttfb_ms = 100;
+        
+        inventory.resources.push(resource);
+        
+        // Save inventory
+        save_inventory_with_fs(&inventory, &inventory_dir, mock_fs.clone())
+            .await
+            .unwrap();
+        
+        // Get the saved JSON
+        let inventory_path = inventory_dir.join("inventory.json").to_string_lossy().to_string();
+        let saved_json = mock_fs.get_file(&inventory_path).unwrap();
+        let json_str = String::from_utf8(saved_json).unwrap();
+        
+        println!("Generated JSON format:");
+        println!("{}", json_str);
+        
+        // 2スペースインデントの確認
+        assert!(json_str.contains("{\n  \"entryUrl\""));
+        assert!(json_str.contains("  \"deviceType\""));
+        assert!(json_str.contains("  \"resources\""));
+        assert!(json_str.contains("    \"method\""));  // リソース内のフィールドは4スペース(2レベル)
+        assert!(json_str.contains("    \"url\""));
+        
+        // 4スペースではないことを確認
+        assert!(!json_str.contains("{\n    \"entryUrl\""));
     }
 }
