@@ -3,9 +3,12 @@ use std::path::PathBuf;
 use crate::types::{DeviceType, Inventory};
 use crate::utils::get_port_or_default;
 
-mod proxy;
+pub mod proxy;
 mod processor;
 mod tests;
+
+#[cfg(test)]
+mod processor_tests;
 
 pub async fn run_recording_mode(
     entry_url: Option<String>,

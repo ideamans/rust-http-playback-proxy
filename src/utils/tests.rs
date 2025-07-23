@@ -22,19 +22,19 @@ mod tests {
     #[test]
     fn test_generate_file_path_from_url_simple() {
         let result = generate_file_path_from_url("https://example.com/", "GET").unwrap();
-        assert_eq!(result, "get/https/index.html");
+        assert_eq!(result, "get/https/example.com/index.html");
     }
 
     #[test]
     fn test_generate_file_path_from_url_with_path() {
         let result = generate_file_path_from_url("https://example.com/path/to/resource.js", "GET").unwrap();
-        assert_eq!(result, "get/https/path/to/resource.js");
+        assert_eq!(result, "get/https/example.com/path/to/resource.js");
     }
 
     #[test]
     fn test_generate_file_path_from_url_with_short_query() {
         let result = generate_file_path_from_url("https://example.com/path/resource?param=value", "GET").unwrap();
-        assert_eq!(result, "get/https/path/resource~param%3Dvalue");
+        assert_eq!(result, "get/https/example.com/path/resource~param%3Dvalue");
     }
 
     #[test]
@@ -42,14 +42,14 @@ mod tests {
         let long_query = "a".repeat(40);
         let result = generate_file_path_from_url(&format!("https://example.com/resource?{}", long_query), "GET").unwrap();
         
-        assert!(result.starts_with("get/https/resource~"));
+        assert!(result.starts_with("get/https/example.com/resource~"));
         assert!(result.contains(".~"));
     }
 
     #[test]
     fn test_generate_file_path_from_url_with_extension() {
         let result = generate_file_path_from_url("https://example.com/script.js?v=1", "GET").unwrap();
-        assert_eq!(result, "get/https/script~v%3D1.js");
+        assert_eq!(result, "get/https/example.com/script~v%3D1.js");
     }
 
     #[test]

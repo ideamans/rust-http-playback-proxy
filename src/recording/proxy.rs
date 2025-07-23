@@ -26,7 +26,11 @@ pub async fn start_recording_proxy(
     info!("Recording proxy listening on {}", addr);
     
     let shared_inventory = Arc::new(Mutex::new(inventory));
-    let processor = Arc::new(RequestProcessor::new(inventory_dir.clone()));
+    let processor = Arc::new(RequestProcessor::new(
+        inventory_dir.clone(),
+        Arc::new(RealFileSystem),
+        Arc::new(RealTimeProvider::new())
+    ));
     let start_time = Arc::new(Instant::now());
 
     // Setup Ctrl+C handler
@@ -76,12 +80,12 @@ pub async fn start_recording_proxy(
 async fn handle_request(
     req: Request<Incoming>,
     shared_inventory: Arc<Mutex<Inventory>>,
-    processor: Arc<RequestProcessor>,
+    processor: Arc<RequestProcessor<RealFileSystem, RealTimeProvider>>,
     start_time: Arc<Instant>,
 ) -> Result<Response<Full<bytes::Bytes>>, hyper::Error> {
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let headers = req.headers().clone();
+    let _headers = req.headers().clone();
     
     debug!("Handling request: {} {}", method, uri);
 
@@ -108,7 +112,7 @@ async fn handle_request(
 
 async fn handle_proxy_request(
     req: Request<Incoming>,
-    _processor: &RequestProcessor,
+    _processor: &RequestProcessor<RealFileSystem, RealTimeProvider>,
     elapsed_since_start: u64,
 ) -> Result<(Response<Full<bytes::Bytes>>, Resource)> {
     let method = req.method().to_string();
@@ -130,13 +134,24 @@ async fn handle_proxy_request(
     Ok((response, resource))
 }
 
+use crate::traits::{FileSystem, RealFileSystem, RealTimeProvider};
+
 pub async fn save_inventory(inventory: &Inventory, inventory_dir: &PathBuf) -> Result<()> {
-    tokio::fs::create_dir_all(inventory_dir).await?;
+    let file_system = Arc::new(RealFileSystem);
+    save_inventory_with_fs(inventory, inventory_dir, file_system).await
+}
+
+pub async fn save_inventory_with_fs<F: FileSystem>(
+    inventory: &Inventory,
+    inventory_dir: &PathBuf,
+    file_system: Arc<F>,
+) -> Result<()> {
+    file_system.create_dir_all(inventory_dir).await?;
     
     let inventory_path = inventory_dir.join("inventory.json");
     let inventory_json = serde_json::to_string_pretty(inventory)?;
     
-    tokio::fs::write(inventory_path, inventory_json).await?;
+    file_system.write_string(&inventory_path, &inventory_json).await?;
     
     Ok(())
 }

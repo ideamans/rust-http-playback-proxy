@@ -9,7 +9,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
         
-        let processor = crate::recording::processor::RequestProcessor::new(inventory_dir.clone());
+        use crate::traits::{RealFileSystem, RealTimeProvider};
+        let processor = crate::recording::processor::RequestProcessor::new(
+            inventory_dir.clone(), 
+            std::sync::Arc::new(RealFileSystem),
+            std::sync::Arc::new(RealTimeProvider::new())
+        );
         
         // The processor should be created successfully
         // (This tests the basic constructor)

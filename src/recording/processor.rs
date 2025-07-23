@@ -3,20 +3,26 @@ use std::path::PathBuf;
 use flate2::read::GzDecoder;
 use std::io::Read;
 use encoding_rs::{Encoding, UTF_8};
+use std::sync::Arc;
 use crate::types::{Resource, ContentEncodingType};
 use crate::utils::{is_text_resource, extract_charset_from_content_type, generate_file_path_from_url};
+use crate::traits::{FileSystem, TimeProvider};
 
-pub struct RequestProcessor {
+pub struct RequestProcessor<F: FileSystem, T: TimeProvider> {
     inventory_dir: PathBuf,
     contents_dir: PathBuf,
+    file_system: Arc<F>,
+    time_provider: Arc<T>,
 }
 
-impl RequestProcessor {
-    pub fn new(inventory_dir: PathBuf) -> Self {
+impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
+    pub fn new(inventory_dir: PathBuf, file_system: Arc<F>, time_provider: Arc<T>) -> Self {
         let contents_dir = inventory_dir.join("contents");
         Self {
             inventory_dir,
             contents_dir,
+            file_system,
+            time_provider,
         }
     }
 
@@ -51,7 +57,7 @@ impl RequestProcessor {
         Ok(())
     }
 
-    fn decompress_body(
+    pub fn decompress_body(
         &self,
         body: &[u8],
         encoding: &Option<ContentEncodingType>,
@@ -78,7 +84,7 @@ impl RequestProcessor {
         }
     }
 
-    async fn process_text_resource(
+    pub async fn process_text_resource(
         &self,
         resource: &mut Resource,
         body: &[u8],
@@ -101,16 +107,16 @@ impl RequestProcessor {
         let full_path = self.contents_dir.join(&file_path);
         
         if let Some(parent) = full_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            self.file_system.create_dir_all(parent).await?;
         }
         
-        tokio::fs::write(&full_path, &utf8_content).await?;
+        self.file_system.write(&full_path, utf8_content.as_bytes()).await?;
         resource.content_file_path = Some(file_path);
         
         Ok(())
     }
 
-    async fn process_binary_resource(
+    pub async fn process_binary_resource(
         &self,
         resource: &mut Resource,
         body: &[u8],
@@ -124,16 +130,16 @@ impl RequestProcessor {
         let full_path = self.contents_dir.join(&file_path);
         
         if let Some(parent) = full_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
+            self.file_system.create_dir_all(parent).await?;
         }
         
-        tokio::fs::write(&full_path, body).await?;
+        self.file_system.write(&full_path, body).await?;
         resource.content_file_path = Some(file_path);
         
         Ok(())
     }
 
-    fn convert_to_utf8(&self, body: &[u8], charset: &Option<String>) -> (String, &'static str) {
+    pub fn convert_to_utf8(&self, body: &[u8], charset: &Option<String>) -> (String, &'static str) {
         let encoding = if let Some(charset_name) = charset {
             Encoding::for_label(charset_name.as_bytes()).unwrap_or(UTF_8)
         } else {
@@ -144,7 +150,7 @@ impl RequestProcessor {
         (cow.into_owned(), encoding_used.name())
     }
 
-    fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
+    pub fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
         match mime_type.as_deref() {
             Some("text/html") => {
                 // Simple HTML beautification - add newlines after tags

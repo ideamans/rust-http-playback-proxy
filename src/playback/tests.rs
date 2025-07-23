@@ -7,6 +7,7 @@ mod tests {
     #[tokio::test]
     async fn test_load_inventory() {
         use crate::playback::load_inventory;
+        use crate::traits::RealFileSystem;
         
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
@@ -26,7 +27,7 @@ mod tests {
         tokio::fs::write(&inventory_path, inventory_json).await.unwrap();
         
         // Test loading
-        let loaded_inventory = load_inventory(&inventory_dir).await.unwrap();
+        let loaded_inventory = load_inventory(&inventory_dir, std::sync::Arc::new(RealFileSystem)).await.unwrap();
         
         assert_eq!(loaded_inventory.entry_url, Some("https://example.com".to_string()));
         assert_eq!(loaded_inventory.device_type, Some(DeviceType::Desktop));
@@ -36,6 +37,7 @@ mod tests {
     #[tokio::test]
     async fn test_convert_resources_to_transactions() {
         use crate::playback::transaction::convert_resources_to_transactions;
+        use crate::traits::RealFileSystem;
         
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
@@ -52,7 +54,7 @@ mod tests {
         inventory.resources.push(resource);
         
         // Convert to transactions
-        let transactions = convert_resources_to_transactions(&inventory, &inventory_dir).await.unwrap();
+        let transactions = convert_resources_to_transactions(&inventory, &inventory_dir, std::sync::Arc::new(RealFileSystem)).await.unwrap();
         
         assert_eq!(transactions.len(), 1);
         
@@ -67,6 +69,7 @@ mod tests {
     #[tokio::test]
     async fn test_convert_resource_with_file() {
         use crate::playback::transaction::convert_resource_to_transaction;
+        use crate::traits::RealFileSystem;
         
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
@@ -90,7 +93,7 @@ mod tests {
         resource.mbps = Some(1.0);
         
         // Convert to transaction
-        let transaction = convert_resource_to_transaction(&resource, &inventory_dir).await.unwrap();
+        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, std::sync::Arc::new(RealFileSystem)).await.unwrap();
         
         assert!(transaction.is_some());
         let transaction = transaction.unwrap();

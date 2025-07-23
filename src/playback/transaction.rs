@@ -1,18 +1,21 @@
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::types::{Inventory, Resource, Transaction, BodyChunk};
+use crate::traits::FileSystem;
 
 const CHUNK_SIZE: usize = 1024 * 8; // 8KB chunks
 const TARGET_MBPS: f64 = 1.0; // Default target speed in Mbps
 
-pub async fn convert_resources_to_transactions(
+pub async fn convert_resources_to_transactions<F: FileSystem>(
     inventory: &Inventory,
     inventory_dir: &PathBuf,
+    file_system: Arc<F>,
 ) -> Result<Vec<Transaction>> {
     let mut transactions = Vec::new();
     
     for resource in &inventory.resources {
-        if let Some(transaction) = convert_resource_to_transaction(resource, inventory_dir).await? {
+        if let Some(transaction) = convert_resource_to_transaction(resource, inventory_dir, file_system.clone()).await? {
             transactions.push(transaction);
         }
     }
@@ -20,15 +23,16 @@ pub async fn convert_resources_to_transactions(
     Ok(transactions)
 }
 
-pub async fn convert_resource_to_transaction(
+pub async fn convert_resource_to_transaction<F: FileSystem>(
     resource: &Resource,
     inventory_dir: &PathBuf,
+    file_system: Arc<F>,
 ) -> Result<Option<Transaction>> {
     // Load content
     let content = if let Some(file_path) = &resource.content_file_path {
         let full_path = inventory_dir.join("contents").join(file_path);
-        if full_path.exists() {
-            tokio::fs::read(&full_path).await?
+        if file_system.exists(&full_path).await {
+            file_system.read(&full_path).await?
         } else if let Some(base64_content) = &resource.content_base64 {
             use base64::{Engine as _, engine::general_purpose};
             general_purpose::STANDARD.decode(base64_content)?

@@ -30,6 +30,7 @@ tracing-subscriber = "0.3"
 urlencoding = "2.1"
 base64 = "0.22"
 bytes = "1.7"
+async-trait = "0.1"
 
 [dev-dependencies]
 tempfile = "3.13"

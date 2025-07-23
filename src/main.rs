@@ -3,6 +3,7 @@ use tracing_subscriber;
 
 mod cli;
 mod types;
+mod traits;
 mod recording;
 mod playback;
 mod utils;

@@ -24,9 +24,10 @@ pub fn get_port_or_default(port: Option<u16>) -> Result<u16> {
 pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
     let parsed_url = Url::parse(url)?;
     let scheme = parsed_url.scheme();
+    let host = parsed_url.host_str().unwrap_or("localhost");
     let path = parsed_url.path();
     
-    let mut file_path = format!("{}/{}", method.to_lowercase(), scheme);
+    let mut file_path = format!("{}/{}/{}", method.to_lowercase(), scheme, host);
     
     // Handle path
     let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
