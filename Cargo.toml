@@ -1,0 +1,35 @@
+[package]
+name = "http-playback-proxy"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+http = "1.0"
+http-body = "1.0"
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+url = "2.5"
+flate2 = "1.0"
+brotli = "7.0"
+sha1 = "0.10"
+hex = "0.4"
+minifier = "0.3"
+encoding_rs = "0.8"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+urlencoding = "2.1"
+base64 = "0.22"
+bytes = "1.7"
+
+[dev-dependencies]
+tempfile = "3.13"
