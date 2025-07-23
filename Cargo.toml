@@ -3,6 +3,7 @@ name = "http-playback-proxy"
 version = "0.1.0"
 edition = "2024"
 
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 tokio = { version = "1.0", features = ["full"] }
@@ -31,6 +32,9 @@ urlencoding = "2.1"
 base64 = "0.22"
 bytes = "1.7"
 async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
 tempfile = "3.13"
+tokio-test = "0.4"
+libc = "0.2"

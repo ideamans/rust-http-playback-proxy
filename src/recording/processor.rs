@@ -27,6 +27,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn process_response_body(
         &self,
         resource: &mut Resource,
@@ -58,6 +59,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn decompress_body(
         &self,
         body: &[u8],
@@ -85,6 +87,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn process_text_resource(
         &self,
         resource: &mut Resource,
@@ -117,6 +120,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn process_binary_resource(
         &self,
         resource: &mut Resource,
@@ -140,6 +144,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn convert_to_utf8(&self, body: &[u8], charset: &Option<String>) -> (String, &'static str) {
         let encoding = if let Some(charset_name) = charset {
             Encoding::for_label(charset_name.as_bytes()).unwrap_or(UTF_8)
@@ -151,6 +156,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         (cow.into_owned(), encoding_used.name())
     }
 
+    #[allow(dead_code)]
     pub fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
         match mime_type.as_deref() {
             Some("text/html") => {

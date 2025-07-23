@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::types::{Inventory, Resource, Transaction, BodyChunk};
 use crate::traits::FileSystem;
 
-const CHUNK_SIZE: usize = 1024 * 8; // 8KB chunks
+const CHUNK_SIZE: usize = 1024 * 16; // 16KB chunks
 const TARGET_MBPS: f64 = 1.0; // Default target speed in Mbps
 
 pub async fn convert_resources_to_transactions<F: FileSystem>(

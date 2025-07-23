@@ -86,9 +86,10 @@ async fn handle_request(
 ) -> Result<Response<Full<bytes::Bytes>>, hyper::Error> {
     let method = req.method().clone();
     let uri = req.uri().clone();
-    let _headers = req.headers().clone();
+    let headers = req.headers().clone();
     
     debug!("Handling request: {} {}", method, uri);
+    info!("Full request details - Method: {}, URI: {}, Headers: {:?}", method, uri, headers);
 
     let request_start = Instant::now();
     let elapsed_since_start = request_start.duration_since(*start_time).as_millis() as u64;
@@ -113,26 +114,93 @@ async fn handle_request(
 
 async fn handle_proxy_request(
     req: Request<Incoming>,
-    _processor: &RequestProcessor<RealFileSystem, RealTimeProvider>,
+    processor: &RequestProcessor<RealFileSystem, RealTimeProvider>,
     elapsed_since_start: u64,
 ) -> Result<(Response<Full<bytes::Bytes>>, Resource)> {
     let method = req.method().to_string();
-    let url = req.uri().to_string();
+    let uri = req.uri();
+    let headers = req.headers();
     
-    // For now, return a simple response
-    // TODO: Implement actual HTTP proxying
-    let mut resource = Resource::new(method, url);
-    resource.ttfb_ms = elapsed_since_start;
-    resource.status_code = Some(200);
+    info!("Received proxy request: {} {}", method, uri);
+    info!("URI components - scheme: {:?}, host: {:?}, path: {:?}", 
+          uri.scheme(), uri.host(), uri.path());
+    info!("Request headers: {:?}", headers);
     
-    let response_body = "Recording mode - this would be the actual response";
-    let response = Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/plain")
-        .body(Full::new(bytes::Bytes::from(response_body)))
-        .unwrap();
+    // For HTTP proxy, the URI should be the full URL
+    // If it's just a path, we need more context
+    let url = if uri.scheme().is_some() && uri.host().is_some() {
+        // This is a full URL (proxy request)
+        uri.to_string()
+    } else {
+        // This is just a path, we need more context
+        error!("Invalid proxy request: URI = {}, scheme = {:?}, host = {:?}", 
+               uri, uri.scheme(), uri.host());
+        return Err(anyhow::anyhow!("Invalid proxy request: missing host information: {}", uri));
+    };
+    
+    debug!("Forwarding request: {} {}", method, url);
+    info!("Proxy forwarding: {} {} (URI: {})", method, url, uri);
+    
+    // Simple HTTP client to forward requests
+    let client = reqwest::Client::new();
+    let request_start = std::time::Instant::now();
+    
+    let response_result = client
+        .request(reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::GET), &url)
+        .send()
+        .await;
+    
+    match response_result {
+        Ok(response) => {
+            let status_code = response.status().as_u16();
+            let headers = response.headers().clone();
+            let body_bytes = response.bytes().await.unwrap_or_default();
+            
+            let ttfb = request_start.elapsed().as_millis() as u64;
+            
+            let mut resource = Resource::new(method, url);
+            resource.ttfb_ms = elapsed_since_start + ttfb;
+            resource.status_code = Some(status_code);
+            
+            // Convert headers
+            let mut resource_headers = std::collections::HashMap::new();
+            for (name, value) in headers.iter() {
+                if let Ok(value_str) = value.to_str() {
+                    resource_headers.insert(name.to_string(), value_str.to_string());
+                }
+            }
+            resource.raw_headers = Some(resource_headers);
+            
+            // Process the response body using the processor
+            let content_type = headers.get("content-type")
+                .and_then(|h| h.to_str().ok());
+            
+            if let Err(e) = processor.process_response_body(&mut resource, &body_bytes, content_type).await {
+                error!("Failed to process response body: {}", e);
+            }
+            
+            let proxy_response = Response::builder()
+                .status(StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK))
+                .body(Full::new(bytes::Bytes::from(body_bytes.clone())))
+                .unwrap();
 
-    Ok((response, resource))
+            Ok((proxy_response, resource))
+        }
+        Err(e) => {
+            error!("HTTP client error: {}", e);
+            let mut resource = Resource::new(method, url);
+            resource.ttfb_ms = elapsed_since_start;
+            resource.status_code = Some(500);
+            resource.error_message = Some(format!("Proxy error: {}", e));
+            
+            let error_response = Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Full::new(bytes::Bytes::from(format!("Proxy error: {}", e))))
+                .unwrap();
+
+            Ok((error_response, resource))
+        }
+    }
 }
 
 use crate::traits::{FileSystem, RealFileSystem, RealTimeProvider};
