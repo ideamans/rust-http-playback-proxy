@@ -1,0 +1,205 @@
+name: Update Binaries
+
+# This workflow downloads compiled binaries from GitHub Releases and creates a PR
+# IMPORTANT: Requires PAT_TOKEN secret with 'repo' and 'workflow' scopes
+# to create PRs and trigger workflows. GITHUB_TOKEN has insufficient permissions.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.0.0)'
+        required: true
+
+jobs:
+  update-binaries:
+    name: Update Go and TypeScript binaries
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.release.tag_name, 'v') || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Use PAT_TOKEN for creating PRs and triggering workflows
+          # If PAT_TOKEN is not available, falls back to GITHUB_TOKEN (limited permissions)
+          token: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Set version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download release artifacts
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+
+          echo "Downloading artifacts for $TAG..."
+
+          # Download all platform artifacts with error checking
+          PLATFORMS="darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 windows-amd64"
+          FAILED_DOWNLOADS=""
+
+          for PLATFORM in $PLATFORMS; do
+            URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/http-playback-proxy-${TAG}-${PLATFORM}.tar.gz"
+            echo "Downloading $URL"
+            if ! curl -L -f -o "${PLATFORM}.tar.gz" "$URL"; then
+              echo "ERROR: Failed to download binary for $PLATFORM"
+              FAILED_DOWNLOADS="$FAILED_DOWNLOADS $PLATFORM"
+            fi
+          done
+
+          # Check if all downloads succeeded
+          if [ -n "$FAILED_DOWNLOADS" ]; then
+            echo "ERROR: Failed to download the following artifacts:$FAILED_DOWNLOADS"
+            echo "Please check that all platform builds completed successfully in the release workflow."
+            exit 1
+          fi
+
+          echo "All artifacts downloaded successfully"
+
+      - name: Extract and organize Go binaries
+        run: |
+          echo "Organizing Go binaries to golang/bin..."
+
+          PLATFORMS="darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 windows-amd64"
+
+          for PLATFORM in $PLATFORMS; do
+            if [ -f "${PLATFORM}.tar.gz" ]; then
+              echo "Processing $PLATFORM..."
+
+              # Create directory structure
+              mkdir -p "golang/bin/$PLATFORM"
+
+              # Extract binary
+              EXTRACT_DIR="/tmp/extract-$PLATFORM"
+              mkdir -p "$EXTRACT_DIR"
+              tar -xzf "${PLATFORM}.tar.gz" -C "$EXTRACT_DIR"
+
+              # Copy binary
+              if [ "$PLATFORM" = "windows-amd64" ]; then
+                cp "$EXTRACT_DIR/http-playback-proxy.exe" "golang/bin/$PLATFORM/"
+              else
+                cp "$EXTRACT_DIR/http-playback-proxy" "golang/bin/$PLATFORM/"
+              fi
+
+              rm -rf "$EXTRACT_DIR"
+            fi
+          done
+
+          echo "✓ All Go binaries organized in golang/bin/"
+
+      - name: Extract and organize TypeScript binaries
+        run: |
+          echo "Organizing TypeScript binaries to typescript/bin..."
+
+          PLATFORMS="darwin-arm64 darwin-amd64 linux-amd64 linux-arm64 windows-amd64"
+
+          for PLATFORM in $PLATFORMS; do
+            if [ -f "${PLATFORM}.tar.gz" ]; then
+              echo "Processing $PLATFORM..."
+
+              # Create directory structure
+              mkdir -p "typescript/bin/$PLATFORM"
+
+              # Extract binary
+              EXTRACT_DIR="/tmp/extract-ts-$PLATFORM"
+              mkdir -p "$EXTRACT_DIR"
+              tar -xzf "${PLATFORM}.tar.gz" -C "$EXTRACT_DIR"
+
+              # Copy binary
+              if [ "$PLATFORM" = "windows-amd64" ]; then
+                cp "$EXTRACT_DIR/http-playback-proxy.exe" "typescript/bin/$PLATFORM/"
+              else
+                cp "$EXTRACT_DIR/http-playback-proxy" "typescript/bin/$PLATFORM/"
+              fi
+
+              rm -rf "$EXTRACT_DIR"
+            fi
+          done
+
+          echo "✓ All TypeScript binaries organized in typescript/bin/"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Update TypeScript package version
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Create package.json if it doesn't exist
+          if [ ! -f "typescript/package.json" ]; then
+            echo "Creating typescript/package.json..."
+            cat > typescript/package.json << EOF
+          {
+            "name": "http-playback-proxy",
+            "version": "$VERSION",
+            "description": "TypeScript wrapper for HTTP Playback Proxy",
+            "main": "dist/index.js",
+            "types": "dist/index.d.ts",
+            "scripts": {
+              "build": "tsc",
+              "test": "npm run build && node --test dist/test/*.test.js"
+            },
+            "keywords": ["http", "proxy", "playback", "recording", "performance"],
+            "author": "PageSpeed Quest",
+            "license": "MIT",
+            "files": ["dist", "bin", "README.md"],
+            "engines": {
+              "node": ">=18.0.0"
+            }
+          }
+          EOF
+          else
+            # Update existing package.json version
+            cd typescript
+            npm version $VERSION --no-git-tag-version --allow-same-version
+          fi
+
+      - name: Clean up downloaded archives
+        run: |
+          rm -f *.tar.gz
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: |
+            Update binaries for ${{ steps.version.outputs.tag }}
+
+            - Added prebuilt binaries to golang/bin/ for all platforms
+            - Added prebuilt binaries to typescript/bin/ for all platforms
+            - Updated TypeScript to version ${{ steps.version.outputs.version }}
+          branch: update-binaries-${{ steps.version.outputs.tag }}
+          delete-branch: true
+          title: 'Update binaries for ${{ steps.version.outputs.tag }}'
+          body: |
+            ## Automated Binary Update
+
+            This PR updates the prebuilt binaries for version `${{ steps.version.outputs.tag }}`.
+
+            ### Changes:
+            - ✅ Go modules: Added binaries to golang/bin/ for all platforms
+            - ✅ TypeScript: Added binaries to typescript/bin/ for all platforms
+            - ✅ TypeScript: Updated package.json to version ${{ steps.version.outputs.version }}
+
+            ### Next Steps:
+            1. Review and merge this PR
+            2. Tag Go modules: `git tag golang/v${{ steps.version.outputs.version }} && git push --tags`
+            3. Publish TypeScript: `cd typescript && npm publish`
+
+            **Auto-generated by release workflow**
+          labels: |
+            automated
+            release

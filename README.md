@@ -26,11 +26,29 @@ Rustで実装されたHTTPトラフィックの録画・再生プロキシサー
 
 ## インストール
 
+### Rustバイナリから
+
 ```bash
 git clone <repository-url>
 cd rust-http-playback-proxy
 cargo build --release
 ```
+
+### Go モジュールとして
+
+```bash
+go get github.com/pagespeed-quest/http-playback-proxy/golang
+```
+
+詳細は [golang/README.md](golang/README.md) を参照してください。
+
+### TypeScript/Node.js モジュールとして
+
+```bash
+npm install http-playback-proxy
+```
+
+詳細は [typescript/README.md](typescript/README.md) を参照してください。
 
 ## 使用方法
 
@@ -286,10 +304,135 @@ let processor = RequestProcessor::new(
 
 プルリクエストやイシューの報告を歓迎します。
 
+## 言語ラッパー
+
+### Go
+
+GoラッパーはRustバイナリをプロセスとして起動し、プロキシの管理とInventoryの読み書きを支援します。
+
+```go
+package main
+
+import (
+    "fmt"
+    proxy "github.com/pagespeed-quest/http-playback-proxy/golang"
+)
+
+func main() {
+    // Start recording proxy (with entry URL)
+    p, err := proxy.StartRecording(proxy.RecordingOptions{
+        EntryURL:     "https://example.com",  // Optional
+        Port:         8080,                   // Optional (default: 8080)
+        DeviceType:   proxy.DeviceTypeMobile, // Optional (default: mobile)
+        InventoryDir: "./inventory",          // Optional (default: ./inventory)
+    })
+    if err != nil {
+        panic(err)
+    }
+
+    // ... Do your requests ...
+
+    // Stop and save
+    p.Stop()
+}
+```
+
+詳細は [golang/README.md](golang/README.md) を参照してください。
+
+### TypeScript/Node.js
+
+TypeScriptラッパーも同様に、Rustバイナリをプロセスとして起動します。
+
+```typescript
+import { startRecording } from 'http-playback-proxy';
+
+async function record() {
+  const proxy = await startRecording({
+    entryUrl: 'https://example.com',  // Optional
+    port: 8080,                       // Optional (default: 8080)
+    deviceType: 'mobile',             // Optional (default: 'mobile')
+    inventoryDir: './inventory',      // Optional (default: './inventory')
+  });
+
+  // ... Do your requests ...
+
+  await proxy.stop();
+}
+```
+
+詳細は [typescript/README.md](typescript/README.md) を参照してください。
+
+## リリースフロー
+
+このプロジェクトは、GitHub Actionsを使用したマルチプラットフォームビルドとリリースプロセスを実装しています。
+
+### 1. Rustバイナリのリリース
+
+```bash
+# バージョンタグを作成してプッシュ
+git tag v0.0.0
+git push origin v0.0.0
+```
+
+これにより、GitHub Actionsが以下のプラットフォーム向けバイナリをビルドし、GitHub Releasesに公開します：
+
+- darwin-arm64 (macOS Apple Silicon)
+- darwin-amd64 (macOS Intel)
+- linux-amd64 (Linux x86_64)
+- linux-arm64 (Linux ARM64)
+- windows-amd64 (Windows x86_64)
+
+### 2. 言語ラッパーへのバイナリ取り込み
+
+リリースが公開されると、`update-binaries` ワークフローが自動的に起動し、以下を行います：
+
+1. 各プラットフォームのバイナリをダウンロード
+2. `golang/bin/` と `typescript/bin/` に配置
+3. TypeScriptの `package.json` のバージョンを更新
+4. プルリクエストを作成
+
+### 3. PRのマージとパッケージ公開
+
+PRをレビュー・マージした後：
+
+**Goモジュールのタグ:**
+```bash
+git tag golang/v0.0.0
+git push origin golang/v0.0.0
+```
+
+**TypeScriptパッケージの公開:**
+```bash
+cd typescript
+npm publish
+```
+
+### ワークフロー概要
+
+```
+v0.0.0 タグ作成
+    ↓
+GitHub Actions: release.yml
+    ↓
+各プラットフォームでビルド
+    ↓
+GitHub Releasesに公開
+    ↓
+GitHub Actions: update-binaries.yml (自動起動)
+    ↓
+バイナリダウンロード & PRの作成
+    ↓
+PRレビュー & マージ
+    ↓
+golang/v0.0.0 タグ & npm publish
+```
+
 ## 更新履歴
 
-- v0.1.0: 初期実装
+- v0.0.0: 初期実装
   - 録画・再生機能
   - HTTPS対応
   - 依存性注入によるテスタビリティ向上
   - 結合テスト実装
+  - Go/TypeScriptラッパー実装
+  - マルチプラットフォームビルド対応

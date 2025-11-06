@@ -1,0 +1,121 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # Allow manual trigger for testing
+
+jobs:
+  build-matrix:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: darwin-arm64
+            target: aarch64-apple-darwin
+          - os: macos-13
+            platform: darwin-amd64
+            target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            platform: linux-amd64
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            platform: windows-amd64
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Cache cargo build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare binary (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p release-${{ matrix.platform }}
+          cp target/${{ matrix.target }}/release/http-playback-proxy release-${{ matrix.platform }}/
+          cd release-${{ matrix.platform }}
+          tar czf ../http-playback-proxy-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz .
+          cd ..
+          ls -lh http-playback-proxy-*.tar.gz
+
+      - name: Prepare binary (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir release-${{ matrix.platform }}
+          cp target/${{ matrix.target }}/release/http-playback-proxy.exe release-${{ matrix.platform }}/
+          cd release-${{ matrix.platform }}
+          tar czf ../http-playback-proxy-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz .
+          cd ..
+          dir http-playback-proxy-*.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-playback-proxy-${{ matrix.platform }}
+          path: http-playback-proxy-*.tar.gz
+          retention-days: 7
+
+  create-release:
+    name: Create GitHub Release
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: |
+          ls -R artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          # Use PAT_TOKEN to trigger the update-binaries workflow
+          # GITHUB_TOKEN cannot trigger other workflows due to GitHub Actions security
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
