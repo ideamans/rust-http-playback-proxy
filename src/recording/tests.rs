@@ -59,11 +59,41 @@ mod tests {
     fn test_handle_proxy_request_creation() {
         // Test that we can create the basic request/response structure
         use crate::types::Resource;
-        
+
         let resource = Resource::new("GET".to_string(), "https://example.com".to_string());
-        
+
         assert_eq!(resource.method, "GET");
         assert_eq!(resource.url, "https://example.com");
         assert_eq!(resource.ttfb_ms, 0);
+    }
+
+    #[test]
+    fn test_content_encoding_parsing() {
+        use crate::types::ContentEncodingType;
+        use std::str::FromStr;
+
+        // Test gzip
+        let gzip = ContentEncodingType::from_str("gzip").unwrap();
+        assert!(matches!(gzip, ContentEncodingType::Gzip));
+
+        // Test br (brotli)
+        let br = ContentEncodingType::from_str("br").unwrap();
+        assert!(matches!(br, ContentEncodingType::Br));
+
+        // Test deflate
+        let deflate = ContentEncodingType::from_str("deflate").unwrap();
+        assert!(matches!(deflate, ContentEncodingType::Deflate));
+
+        // Test identity
+        let identity = ContentEncodingType::from_str("identity").unwrap();
+        assert!(matches!(identity, ContentEncodingType::Identity));
+
+        // Test case insensitivity
+        let gzip_upper = ContentEncodingType::from_str("GZIP").unwrap();
+        assert!(matches!(gzip_upper, ContentEncodingType::Gzip));
+
+        // Test invalid encoding
+        let invalid = ContentEncodingType::from_str("invalid-encoding");
+        assert!(invalid.is_err());
     }
 }

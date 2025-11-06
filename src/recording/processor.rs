@@ -7,6 +7,7 @@ use std::sync::Arc;
 use crate::types::{Resource, ContentEncodingType};
 use crate::utils::{is_text_resource, extract_charset_from_content_type, generate_file_path_from_url};
 use crate::traits::{FileSystem, TimeProvider};
+use regex::Regex;
 
 #[allow(dead_code)]
 pub struct RequestProcessor<F: FileSystem, T: TimeProvider> {
@@ -41,7 +42,11 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
             resource.content_type_charset = extract_charset_from_content_type(ct);
 
             if is_text_resource(ct) {
-                self.process_text_resource(resource, &decompressed_body).await?;
+                // Try to process as text, fallback to binary if it fails
+                if let Err(e) = self.process_text_resource(resource, &decompressed_body).await {
+                    tracing::warn!("Failed to process as text resource, falling back to binary: {}", e);
+                    self.process_binary_resource(resource, &decompressed_body).await?;
+                }
             } else {
                 self.process_binary_resource(resource, &decompressed_body).await?;
             }
@@ -49,11 +54,18 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
             self.process_binary_resource(resource, &decompressed_body).await?;
         }
 
-        // Calculate mbps
+        // Calculate mbps (excluding latency/TTFB)
+        // Mbps = (body_size / download_time) / (1024 * 1024)
+        // where download_time = download_end_ms - ttfb_ms
         let body_size = decompressed_body.len() as f64;
-        if resource.ttfb_ms > 0 {
-            let seconds = (resource.ttfb_ms as f64) / 1000.0;
-            resource.mbps = Some((body_size / seconds) / (1024.0 * 1024.0));
+        if let Some(download_end_ms) = resource.download_end_ms {
+            if download_end_ms > resource.ttfb_ms {
+                let download_time_ms = download_end_ms - resource.ttfb_ms;
+                let seconds = (download_time_ms as f64) / 1000.0;
+                if seconds > 0.0 {
+                    resource.mbps = Some((body_size / seconds) / (1024.0 * 1024.0));
+                }
+            }
         }
 
         Ok(())
@@ -94,18 +106,21 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         body: &[u8],
     ) -> Result<()> {
         // Convert to UTF-8
-        let (utf8_content, _detected_encoding) = self.convert_to_utf8(body, &resource.content_type_charset);
-        
+        let (mut utf8_content, _detected_encoding) = self.convert_to_utf8(body, &resource.content_type_charset);
+
         // Update charset to UTF-8
         resource.content_type_charset = Some("UTF-8".to_string());
-        
+
+        // Remove charset declarations from HTML/CSS content
+        utf8_content = self.remove_charset_declarations(&utf8_content, &resource.content_type_mime);
+
         // Check if content was minified by beautifying and comparing line counts
         let original_lines = utf8_content.lines().count();
         let beautified = self.beautify_content(&utf8_content, &resource.content_type_mime)?;
         let beautified_lines = beautified.lines().count();
-        
+
         resource.minify = Some(beautified_lines >= original_lines * 2);
-        
+
         // Save content to file
         let file_path = generate_file_path_from_url(&resource.url, &resource.method)?;
         let full_path = self.contents_dir.join(&file_path);
@@ -117,7 +132,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         self.file_system.write(&full_path, utf8_content.as_bytes()).await?;
         // Store path relative to inventory dir (with "contents/" prefix)
         resource.content_file_path = Some(format!("contents/{}", file_path));
-        
+
         Ok(())
     }
 
@@ -159,36 +174,47 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
     }
 
     #[allow(dead_code)]
+    pub fn remove_charset_declarations(&self, content: &str, mime_type: &Option<String>) -> String {
+        match mime_type.as_deref() {
+            Some("text/html") => {
+                // Replace HTML charset declarations with UTF-8
+                // Pattern 1: <meta charset="...">
+                let re_meta_charset = Regex::new(r#"(?i)<meta\s+charset\s*=\s*["']?[^"'>]+["']?\s*/?>"#).unwrap();
+                let mut result = re_meta_charset.replace_all(content, r#"<meta charset="UTF-8">"#).to_string();
+
+                // Pattern 2: <meta http-equiv="Content-Type" content="...; charset=...">
+                let re_meta_http_equiv = Regex::new(r#"(?i)<meta\s+http-equiv\s*=\s*["']?Content-Type["']?\s+content\s*=\s*["']?[^"'>]*charset=[^"'>]+["']?\s*/?>"#).unwrap();
+                result = re_meta_http_equiv.replace_all(&result, r#"<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">"#).to_string();
+
+                // Also handle reverse order: <meta content="..." http-equiv="Content-Type">
+                let re_meta_reverse = Regex::new(r#"(?i)<meta\s+content\s*=\s*["']?[^"'>]*charset=[^"'>]+["']?\s+http-equiv\s*=\s*["']?Content-Type["']?\s*/?>"#).unwrap();
+                result = re_meta_reverse.replace_all(&result, r#"<meta content="text/html; charset=UTF-8" http-equiv="Content-Type">"#).to_string();
+
+                result
+            }
+            Some("text/css") => {
+                // Remove CSS @charset declarations completely
+                let re_charset = Regex::new(r#"@charset\s+["'][^"']+["']\s*;\s*"#).unwrap();
+                re_charset.replace_all(content, "").to_string()
+            }
+            _ => content.to_string()
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
         match mime_type.as_deref() {
             Some("text/html") => {
-                // Simple HTML beautification - add newlines after tags
-                let mut result = String::new();
-                let mut _in_tag = false;
-                
-                for ch in content.chars() {
-                    result.push(ch);
-                    match ch {
-                        '<' => _in_tag = true,
-                        '>' => {
-                            _in_tag = false;
-                            result.push('\n');
-                        }
-                        _ => {}
-                    }
-                }
-                Ok(result)
-            }
-            Some("text/css") => {
-                // Simple CSS beautification
-                let result = content
-                    .replace('{', "{\n")
-                    .replace('}', "\n}\n")
-                    .replace(';', ";\n");
-                Ok(result)
+                // Use prettyish-html library
+                Ok(prettyish_html::prettify(content).to_string())
             }
             Some("application/javascript") | Some("text/javascript") => {
-                // Simple JS beautification
+                // Use prettify-js library
+                let (prettified, _source_map) = prettify_js::prettyprint(content);
+                Ok(prettified)
+            }
+            Some("text/css") => {
+                // Simple CSS beautification (no library available for current Rust version)
                 let result = content
                     .replace('{', "{\n")
                     .replace('}', "\n}\n")

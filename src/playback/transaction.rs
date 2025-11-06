@@ -99,8 +99,8 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
     let total_size = content.len();
 
     if total_size == 0 {
-        // If no content, close time is same as TTFB
-        return Ok((chunks, resource.ttfb_ms));
+        // If no content, close time is 0 (TTFB is handled separately in serve_transaction)
+        return Ok((chunks, 0));
     }
 
     // Calculate timing based on mbps or use default
@@ -110,7 +110,8 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
     let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0; // Bytes per millisecond
 
     let mut offset = 0;
-    let mut current_time = resource.ttfb_ms;
+    // Start at 0 since TTFB is handled separately - chunks are relative to after TTFB
+    let mut current_time = 0;
 
     while offset < total_size {
         let chunk_size = std::cmp::min(CHUNK_SIZE, total_size - offset);
@@ -127,9 +128,9 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
         offset += chunk_size;
     }
 
-    // Calculate target_close_time: TTFB + total transfer time
+    // Calculate target_close_time: total transfer time (TTFB handled separately)
     let total_transfer_time_ms = (total_size as f64 / bytes_per_ms) as u64;
-    let target_close_time = resource.ttfb_ms + total_transfer_time_ms;
+    let target_close_time = total_transfer_time_ms;
 
     Ok((chunks, target_close_time))
 }

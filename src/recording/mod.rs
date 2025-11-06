@@ -6,6 +6,7 @@ use crate::utils::get_port_or_default;
 pub mod proxy;
 mod processor;
 mod tests;
+mod hudsucker_handler;
 
 #[cfg(test)]
 mod processor_tests;

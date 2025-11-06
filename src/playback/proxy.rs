@@ -52,14 +52,33 @@ async fn handle_playback_request(
     use http_body_util::BodyExt;
 
     let method = req.method().to_string();
-    let uri = req.uri().to_string();
+    let uri = req.uri().clone();
+    let headers = req.headers();
 
-    debug!("Handling playback request: {} {}", method, uri);
+    // Reconstruct full URL from URI and Host header
+    let url = if uri.scheme().is_some() {
+        // Full URL in request (proxy-style)
+        uri.to_string()
+    } else {
+        // Relative URL - reconstruct from Host header
+        if let Some(host) = headers.get("host") {
+            if let Ok(host_str) = host.to_str() {
+                // Use https by default for recorded resources
+                format!("https://{}{}", host_str, uri.path())
+            } else {
+                uri.to_string()
+            }
+        } else {
+            uri.to_string()
+        }
+    };
+
+    debug!("Handling playback request: {} {} (reconstructed URL: {})", method, uri, url);
 
     // Find matching transaction
     let transaction = transactions
         .iter()
-        .find(|t| t.method == method && t.url == uri)
+        .find(|t| t.method == method && t.url == url)
         .cloned();
 
     match transaction {
@@ -80,11 +99,11 @@ async fn handle_playback_request(
             }
         }
         None => {
-            info!("No transaction found for: {} {}", method, uri);
+            info!("No transaction found for: {} {} (url: {})", method, uri, url);
             Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body(
-                    http_body_util::Full::new(bytes::Bytes::from("Resource not found in playback data"))
+                    http_body_util::Full::new(bytes::Bytes::from(format!("Resource not found in playback data: {} {}", method, url)))
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
                         .boxed()
                 )
@@ -95,18 +114,12 @@ async fn handle_playback_request(
 
 async fn serve_transaction(
     transaction: Transaction,
-    start_time: Arc<Instant>,
+    _start_time: Arc<Instant>,
 ) -> Result<Response<http_body_util::combinators::BoxBody<bytes::Bytes, std::io::Error>>> {
     use http_body_util::BodyExt;
 
-    let request_start = Instant::now();
-    let elapsed_since_start = request_start.duration_since(*start_time).as_millis() as u64;
-
-    // Wait for TTFB
-    if transaction.ttfb > elapsed_since_start {
-        let wait_time = transaction.ttfb - elapsed_since_start;
-        tokio::time::sleep(Duration::from_millis(wait_time)).await;
-    }
+    // Wait for TTFB (this is a duration from request arrival, not a timestamp)
+    tokio::time::sleep(Duration::from_millis(transaction.ttfb)).await;
 
     // If there's an error message, return error response
     if let Some(error_msg) = &transaction.error_message {

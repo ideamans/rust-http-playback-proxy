@@ -162,4 +162,44 @@ mod tests {
         assert!(result.contains('\n'));
         assert!(result.len() >= minified_css.len());
     }
+
+    #[test]
+    fn test_remove_charset_declarations_html() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+
+        // Test <meta charset="...">
+        let html_with_charset = r#"<html><head><meta charset="shift_jis"><title>Test</title></head><body>Content</body></html>"#;
+        let result = processor.remove_charset_declarations(html_with_charset, &Some("text/html".to_string()));
+        assert!(result.contains(r#"<meta charset="UTF-8">"#));
+        assert!(!result.contains("shift_jis"));
+
+        // Test <meta http-equiv="Content-Type" content="...; charset=...">
+        let html_with_http_equiv = r#"<html><head><meta http-equiv="Content-Type" content="text/html; charset=euc-jp"><title>Test</title></head></html>"#;
+        let result = processor.remove_charset_declarations(html_with_http_equiv, &Some("text/html".to_string()));
+        assert!(result.contains(r#"charset=UTF-8"#));
+        assert!(!result.contains("euc-jp"));
+    }
+
+    #[test]
+    fn test_remove_charset_declarations_css() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+
+        // Test @charset declaration removal
+        let css_with_charset = r#"@charset "UTF-8"; body { color: red; }"#;
+        let result = processor.remove_charset_declarations(css_with_charset, &Some("text/css".to_string()));
+        assert!(!result.contains("@charset"));
+        assert!(result.contains("body"));
+    }
 }
