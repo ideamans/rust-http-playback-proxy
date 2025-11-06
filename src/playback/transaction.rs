@@ -30,7 +30,8 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
 ) -> Result<Option<Transaction>> {
     // Load content
     let content = if let Some(file_path) = &resource.content_file_path {
-        let full_path = inventory_dir.join("contents").join(file_path);
+        // file_path is now relative to inventory_dir (includes "contents/" prefix)
+        let full_path = inventory_dir.join(file_path);
         if file_system.exists(&full_path).await {
             file_system.read(&full_path).await?
         } else if let Some(base64_content) = &resource.content_base64 {

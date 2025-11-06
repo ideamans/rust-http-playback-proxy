@@ -213,11 +213,17 @@ func (p *Proxy) Stop() error {
 	select {
 	case err := <-done:
 		if err != nil {
-			// Exit code 130 is expected for SIGINT
+			// Exit code 130 is expected for SIGINT, and some systems also return -1
 			if exitErr, ok := err.(*exec.ExitError); ok {
-				if exitErr.ExitCode() == 130 {
+				exitCode := exitErr.ExitCode()
+				if exitCode == 130 || exitCode == -1 {
+					// SIGINT is a normal way to stop the proxy
 					return nil
 				}
+			}
+			// For other signal-related errors, also treat as success
+			if err.Error() == "signal: interrupt" {
+				return nil
 			}
 			return fmt.Errorf("proxy exited with error: %w", err)
 		}

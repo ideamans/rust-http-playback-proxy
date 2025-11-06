@@ -1,0 +1,146 @@
+name: Acceptance Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'golang/bin/**'
+      - 'typescript/bin/**'
+      - 'accept/**'
+      - '.github/workflows/acceptance-test.yml'
+  workflow_dispatch:
+
+jobs:
+  test-golang:
+    name: Go Acceptance Test - ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-amd64
+          - os: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Verify binary exists
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BINARY_PATH="golang/bin/${{ matrix.platform }}/http-playback-proxy.exe"
+          else
+            BINARY_PATH="golang/bin/${{ matrix.platform }}/http-playback-proxy"
+          fi
+
+          if [ ! -f "$BINARY_PATH" ]; then
+            echo "ERROR: Binary not found at $BINARY_PATH"
+            echo "This PR should include binaries for all platforms"
+            exit 1
+          fi
+
+          echo "✓ Binary found at $BINARY_PATH"
+          ls -lh "$BINARY_PATH" || true
+
+      - name: Download Go dependencies
+        working-directory: accept/golang
+        run: go mod download
+
+      - name: Run Go acceptance test
+        working-directory: accept/golang
+        run: go test -v -timeout 5m
+        env:
+          # Force use of local binaries (don't download from GitHub)
+          HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/golang
+
+  test-typescript:
+    name: TypeScript Acceptance Test - ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-amd64
+          - os: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Verify binary exists
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BINARY_PATH="typescript/bin/${{ matrix.platform }}/http-playback-proxy.exe"
+          else
+            BINARY_PATH="typescript/bin/${{ matrix.platform }}/http-playback-proxy"
+          fi
+
+          if [ ! -f "$BINARY_PATH" ]; then
+            echo "ERROR: Binary not found at $BINARY_PATH"
+            echo "This PR should include binaries for all platforms"
+            exit 1
+          fi
+
+          echo "✓ Binary found at $BINARY_PATH"
+          ls -lh "$BINARY_PATH" || true
+
+      - name: Build TypeScript wrapper
+        working-directory: typescript
+        run: npm run build
+
+      - name: Install test dependencies
+        working-directory: accept/typescript
+        run: npm install
+
+      - name: Run TypeScript acceptance test
+        working-directory: accept/typescript
+        run: npm test
+        env:
+          # Force use of local binaries (don't download from GitHub)
+          HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/typescript
+
+  summary:
+    name: Test Summary
+    needs: [test-golang, test-typescript]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.test-golang.result }}" != "success" ] || [ "${{ needs.test-typescript.result }}" != "success" ]; then
+            echo "❌ Some acceptance tests failed"
+            echo "Go tests: ${{ needs.test-golang.result }}"
+            echo "TypeScript tests: ${{ needs.test-typescript.result }}"
+            exit 1
+          fi
+
+          echo "✅ All acceptance tests passed!"
+          echo "This PR is ready to be merged and released."

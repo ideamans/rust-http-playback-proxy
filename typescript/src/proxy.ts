@@ -61,13 +61,14 @@ export class Proxy {
       }, 10000);
 
       // Listen for exit
-      this.process.once('exit', (code) => {
+      this.process.once('exit', (code, signal) => {
         clearTimeout(timeout);
-        // Exit code 130 is expected for SIGINT
-        if (code === 0 || code === 130) {
+        // Exit code 130 is expected for SIGINT, null can also occur on some platforms
+        // Also accept signal === 'SIGINT' as success
+        if (code === 0 || code === 130 || code === null || signal === 'SIGINT') {
           resolve();
         } else {
-          reject(new Error(`Proxy exited with code ${code}`));
+          reject(new Error(`Proxy exited with code ${code} signal ${signal}`));
         }
       });
 
@@ -131,7 +132,7 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   const binaryPath = getFullBinaryPath();
 
   // Set defaults to match CLI behavior
-  const port = options.port || 8080;
+  const port = options.port !== undefined ? options.port : 8080;
   const deviceType = options.deviceType || 'mobile';
   const inventoryDir = options.inventoryDir || './inventory';
 
@@ -144,7 +145,7 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   }
 
   // Add port option (only if not default)
-  if (options.port) {
+  if (options.port !== undefined) {
     args.push('--port', port.toString());
   }
 
@@ -178,7 +179,7 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   const binaryPath = getFullBinaryPath();
 
   // Set defaults
-  const port = options.port || 8080;
+  const port = options.port !== undefined ? options.port : 8080;
   const inventoryDir = options.inventoryDir || './inventory';
 
   // Verify inventory exists
@@ -191,7 +192,7 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   const args: string[] = ['playback'];
 
   // Add port option (only if not default)
-  if (options.port && options.port !== 8080) {
+  if (options.port !== undefined && options.port !== 8080) {
     args.push('--port', port.toString());
   }
 

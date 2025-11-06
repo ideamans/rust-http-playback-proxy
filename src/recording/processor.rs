@@ -109,13 +109,14 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         // Save content to file
         let file_path = generate_file_path_from_url(&resource.url, &resource.method)?;
         let full_path = self.contents_dir.join(&file_path);
-        
+
         if let Some(parent) = full_path.parent() {
             self.file_system.create_dir_all(parent).await?;
         }
-        
+
         self.file_system.write(&full_path, utf8_content.as_bytes()).await?;
-        resource.content_file_path = Some(file_path);
+        // Store path relative to inventory dir (with "contents/" prefix)
+        resource.content_file_path = Some(format!("contents/{}", file_path));
         
         Ok(())
     }
@@ -133,13 +134,14 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         // Also save to file
         let file_path = generate_file_path_from_url(&resource.url, &resource.method)?;
         let full_path = self.contents_dir.join(&file_path);
-        
+
         if let Some(parent) = full_path.parent() {
             self.file_system.create_dir_all(parent).await?;
         }
-        
+
         self.file_system.write(&full_path, body).await?;
-        resource.content_file_path = Some(file_path);
+        // Store path relative to inventory dir (with "contents/" prefix)
+        resource.content_file_path = Some(format!("contents/{}", file_path));
         
         Ok(())
     }

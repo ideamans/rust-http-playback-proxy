@@ -422,10 +422,50 @@ GitHub Actions: update-binaries.yml (自動起動)
     ↓
 バイナリダウンロード & PRの作成
     ↓
+GitHub Actions: acceptance-test.yml (PR作成時に自動実行)
+    ↓
+受け入れテスト (Go/TypeScript × 複数プラットフォーム)
+    ↓
 PRレビュー & マージ
     ↓
 golang/v0.0.0 タグ & npm publish
 ```
+
+## 受け入れテスト
+
+`accept/` ディレクトリには、本番環境に近い状態で動作を検証する受け入れテストが含まれています。
+
+### テスト内容
+
+各言語ラッパー（Go/TypeScript）に対して以下をテスト：
+1. **Recording**: HTTPトラフィックの録画と保存
+2. **Inventory解析**: 録画データの読み込みと検証
+3. **Playback**: 録画データの再生と精度確認
+
+### テスト環境
+
+- **複数プラットフォーム**: ubuntu, macos (ARM64/x86_64), windows
+- **本番同等**: 実際のGoモジュール/npmパッケージとして使用
+- **自動実行**: PRに対して自動実行される
+
+### ローカルでのテスト実行
+
+**Go:**
+```bash
+cd accept/golang
+go test -v -timeout 5m
+```
+
+**TypeScript:**
+```bash
+cd accept/typescript
+npm install
+npm test
+```
+
+詳細は各ディレクトリのREADMEを参照してください：
+- [accept/golang/README.md](accept/golang/README.md)
+- [accept/typescript/README.md](accept/typescript/README.md)
 
 ## 更新履歴
 

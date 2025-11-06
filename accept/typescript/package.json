@@ -1,0 +1,16 @@
+{
+  "name": "http-playback-proxy-acceptance-test",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Acceptance tests for http-playback-proxy TypeScript wrapper",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test.js"
+  },
+  "dependencies": {
+    "http-playback-proxy": "file:../../typescript"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

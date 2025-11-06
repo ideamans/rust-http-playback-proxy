@@ -1,1 +1,13 @@
 /target
+
+# TypeScript build artifacts and dependencies
+/typescript/dist/
+/typescript/node_modules/
+/typescript/package-lock.json
+
+# Acceptance test artifacts
+/accept/golang/inventory/
+/accept/typescript/inventory/
+/accept/typescript/node_modules/
+/accept/typescript/package-lock.json
+/accept/golang/go.sum
