@@ -158,12 +158,14 @@ use serde::Serialize;
             error_message: None,
             raw_headers: None,
             chunks,
+            target_close_time: 300, // Example close time
         };
-        
+
         assert_eq!(transaction.method, "GET");
         assert_eq!(transaction.url, "https://example.com");
         assert_eq!(transaction.ttfb, 50);
         assert_eq!(transaction.status_code, Some(200));
         assert_eq!(transaction.chunks.len(), 2);
+        assert_eq!(transaction.target_close_time, 300);
     }
 }

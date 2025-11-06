@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::types::{Inventory, Resource, Transaction, BodyChunk};
 use crate::traits::FileSystem;
 
-const CHUNK_SIZE: usize = 1024 * 16; // 16KB chunks
+const CHUNK_SIZE: usize = 1024 * 64; // 64KB chunks
 const TARGET_MBPS: f64 = 1.0; // Default target speed in Mbps
 
 pub async fn convert_resources_to_transactions<F: FileSystem>(
@@ -65,14 +65,14 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
         processed_content
     };
 
-    // Create chunks
-    let chunks = create_chunks(&final_content, resource)?;
+    // Create chunks and calculate target_close_time
+    let (chunks, target_close_time) = create_chunks(&final_content, resource)?;
 
     let mut headers = resource.raw_headers.clone().unwrap_or_default();
-    
+
     // Update content-length
     headers.insert("content-length".to_string(), final_content.len().to_string());
-    
+
     // Update charset if it's a text resource
     if let Some(mime_type) = &resource.content_type_mime {
         if let Some(charset) = &resource.content_type_charset {
@@ -90,40 +90,48 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
         error_message: resource.error_message.clone(),
         raw_headers: Some(headers),
         chunks,
+        target_close_time,
     }))
 }
 
-pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<Vec<BodyChunk>> {
+pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChunk>, u64)> {
     let mut chunks = Vec::new();
     let total_size = content.len();
-    
+
     if total_size == 0 {
-        return Ok(chunks);
+        // If no content, close time is same as TTFB
+        return Ok((chunks, resource.ttfb_ms));
     }
 
     // Calculate timing based on mbps or use default
     let mbps = resource.mbps.unwrap_or(TARGET_MBPS);
-    let bytes_per_ms = (mbps * 1024.0 * 1024.0) / 1000.0; // Bytes per millisecond
-    
+    // Mbps (megabits per second) to bytes per millisecond:
+    // mbps * 1,000,000 bits/sec / 8 bits/byte / 1000 ms/sec = mbps * 125 bytes/ms
+    let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0; // Bytes per millisecond
+
     let mut offset = 0;
     let mut current_time = resource.ttfb_ms;
-    
+
     while offset < total_size {
         let chunk_size = std::cmp::min(CHUNK_SIZE, total_size - offset);
         let chunk_data = content[offset..offset + chunk_size].to_vec();
-        
+
         chunks.push(BodyChunk {
             chunk: chunk_data,
             target_time: current_time,
         });
-        
+
         // Calculate time for next chunk
         let chunk_duration_ms = (chunk_size as f64 / bytes_per_ms) as u64;
         current_time += chunk_duration_ms;
         offset += chunk_size;
     }
-    
-    Ok(chunks)
+
+    // Calculate target_close_time: TTFB + total transfer time
+    let total_transfer_time_ms = (total_size as f64 / bytes_per_ms) as u64;
+    let target_close_time = resource.ttfb_ms + total_transfer_time_ms;
+
+    Ok((chunks, target_close_time))
 }
 
 pub fn minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<u8>> {

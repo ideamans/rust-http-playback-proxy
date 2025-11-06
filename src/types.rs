@@ -93,6 +93,7 @@ pub struct Transaction {
     pub error_message: Option<String>,
     pub raw_headers: Option<HttpHeaders>,
     pub chunks: Vec<BodyChunk>,
+    pub target_close_time: u64, // Ideal connection close time in ms
 }
 
 impl Resource {

@@ -3,12 +3,14 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper::body::Incoming;
-use http_body_util::Full;
+use http_body_util::StreamBody;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use std::sync::Arc;
 use std::time::{Instant, Duration};
 use tracing::{info, error, debug};
+use hyper::body::Frame;
+use futures::stream;
 
 use crate::types::Transaction;
 
@@ -46,10 +48,12 @@ async fn handle_playback_request(
     req: Request<Incoming>,
     transactions: Arc<Vec<Transaction>>,
     start_time: Arc<Instant>,
-) -> Result<Response<Full<bytes::Bytes>>, hyper::Error> {
+) -> Result<Response<http_body_util::combinators::BoxBody<bytes::Bytes, std::io::Error>>, hyper::Error> {
+    use http_body_util::BodyExt;
+
     let method = req.method().to_string();
     let uri = req.uri().to_string();
-    
+
     debug!("Handling playback request: {} {}", method, uri);
 
     // Find matching transaction
@@ -66,7 +70,11 @@ async fn handle_playback_request(
                     error!("Error serving transaction: {}", e);
                     Ok(Response::builder()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .body(Full::new(bytes::Bytes::from(format!("Transaction error: {}", e))))
+                        .body(
+                            http_body_util::Full::new(bytes::Bytes::from(format!("Transaction error: {}", e)))
+                                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                                .boxed()
+                        )
                         .unwrap())
                 }
             }
@@ -75,7 +83,11 @@ async fn handle_playback_request(
             info!("No transaction found for: {} {}", method, uri);
             Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
-                .body(Full::new(bytes::Bytes::from("Resource not found in playback data")))
+                .body(
+                    http_body_util::Full::new(bytes::Bytes::from("Resource not found in playback data"))
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                        .boxed()
+                )
                 .unwrap())
         }
     }
@@ -84,7 +96,9 @@ async fn handle_playback_request(
 async fn serve_transaction(
     transaction: Transaction,
     start_time: Arc<Instant>,
-) -> Result<Response<Full<bytes::Bytes>>> {
+) -> Result<Response<http_body_util::combinators::BoxBody<bytes::Bytes, std::io::Error>>> {
+    use http_body_util::BodyExt;
+
     let request_start = Instant::now();
     let elapsed_since_start = request_start.duration_since(*start_time).as_millis() as u64;
 
@@ -98,7 +112,11 @@ async fn serve_transaction(
     if let Some(error_msg) = &transaction.error_message {
         return Ok(Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .body(Full::new(bytes::Bytes::from(error_msg.clone())))?);
+            .body(
+                http_body_util::Full::new(bytes::Bytes::from(error_msg.clone()))
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+                    .boxed()
+            )?);
     }
 
     // Build response
@@ -112,15 +130,57 @@ async fn serve_transaction(
         }
     }
 
-    // Collect all chunks into a single body
-    // In a real implementation, we would stream chunks with proper timing
-    let mut body_data = Vec::new();
-    for chunk in &transaction.chunks {
-        body_data.extend_from_slice(&chunk.chunk);
-    }
+    // Create streaming body with timing control
+    let chunks = transaction.chunks.clone();
+    let target_close_time = transaction.target_close_time;
+    let request_instant = Instant::now();
 
-    let response = response_builder
-        .body(Full::new(bytes::Bytes::from(body_data)))?;
+    let stream = stream::unfold(
+        (chunks.into_iter(), request_instant, target_close_time, false),
+        |(mut iter, req_instant, close_time, is_done)| async move {
+            if is_done {
+                return None;
+            }
+
+            if let Some(chunk) = iter.next() {
+                // Check current elapsed time
+                let elapsed = req_instant.elapsed().as_millis() as u64;
+
+                // Only wait if we're ahead of schedule
+                // If we're behind (elapsed > target_time), send immediately to catch up
+                if chunk.target_time > elapsed {
+                    let wait_time = chunk.target_time - elapsed;
+                    debug!("Waiting {}ms before sending chunk (target: {}ms, elapsed: {}ms)",
+                           wait_time, chunk.target_time, elapsed);
+                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                } else if chunk.target_time < elapsed {
+                    // We're behind schedule - log it but send immediately
+                    let behind_ms = elapsed - chunk.target_time;
+                    debug!("Behind schedule by {}ms, sending chunk immediately (target: {}ms, elapsed: {}ms)",
+                           behind_ms, chunk.target_time, elapsed);
+                }
+
+                // Send chunk
+                let frame = Frame::data(bytes::Bytes::from(chunk.chunk));
+                Some((Ok::<_, std::io::Error>(frame), (iter, req_instant, close_time, false)))
+            } else {
+                // All chunks sent, wait until target_close_time before closing
+                let elapsed = req_instant.elapsed().as_millis() as u64;
+                if close_time > elapsed {
+                    let wait_time = close_time - elapsed;
+                    debug!("All chunks sent, waiting {}ms until target_close_time", wait_time);
+                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                } else {
+                    let behind_ms = elapsed - close_time;
+                    debug!("Behind target_close_time by {}ms, closing immediately", behind_ms);
+                }
+                None
+            }
+        },
+    );
+
+    let body = StreamBody::new(stream).boxed();
+    let response = response_builder.body(body)?;
 
     Ok(response)
 }

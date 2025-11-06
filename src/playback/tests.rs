@@ -95,7 +95,7 @@ use serde::Serialize;
         let mut resource = Resource::new("GET".to_string(), "https://example.com/test.txt".to_string());
         resource.status_code = Some(200);
         resource.ttfb_ms = 50;
-        resource.content_file_path = Some(file_path.to_string());
+        resource.content_file_path = Some(format!("contents/{}", file_path));
         resource.mbps = Some(1.0);
         
         // Convert to transaction
@@ -123,27 +123,30 @@ use serde::Serialize;
     #[test]
     fn test_create_chunks() {
         use crate::playback::transaction::create_chunks;
-        
+
         let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
         resource.ttfb_ms = 100;
         resource.mbps = Some(1.0); // 1 Mbps
-        
+
         let content = b"This is test content for chunking";
-        let chunks = create_chunks(content, &resource).unwrap();
-        
+        let (chunks, target_close_time) = create_chunks(content, &resource).unwrap();
+
         assert!(!chunks.is_empty());
-        
+
         // Verify that all chunks have target times >= ttfb
         for chunk in &chunks {
             assert!(chunk.target_time >= resource.ttfb_ms);
         }
-        
+
         // Verify that combined chunks equal original content
         let mut combined = Vec::new();
         for chunk in &chunks {
             combined.extend_from_slice(&chunk.chunk);
         }
         assert_eq!(combined, content);
+
+        // Verify target_close_time is set appropriately
+        assert!(target_close_time >= resource.ttfb_ms);
     }
 
     #[test]
@@ -171,21 +174,137 @@ use serde::Serialize;
     #[test]
     fn test_compress_content() {
         use crate::playback::transaction::compress_content;
-        
+
         let content = b"This is some test content that should be compressed";
-        
+
         // Test Gzip compression
         let compressed = compress_content(content, &ContentEncodingType::Gzip).unwrap();
         assert!(compressed.len() > 0);
         assert_ne!(compressed, content);
-        
+
         // Test Deflate compression
         let compressed = compress_content(content, &ContentEncodingType::Deflate).unwrap();
         assert!(compressed.len() > 0);
         assert_ne!(compressed, content);
-        
+
         // Test Identity (no compression)
         let not_compressed = compress_content(content, &ContentEncodingType::Identity).unwrap();
         assert_eq!(not_compressed, content);
+    }
+
+    #[tokio::test]
+    async fn test_chunk_timing_with_delay() {
+        use crate::playback::transaction::create_chunks;
+        use std::time::Instant;
+
+        // Create a resource with specific timing
+        let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
+        resource.ttfb_ms = 100;
+        resource.mbps = Some(1.0); // 1 Mbps
+
+        // Create content that will be split into multiple chunks
+        let content = vec![0u8; 128 * 1024]; // 128KB content
+        let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
+
+        // Verify multiple chunks were created
+        assert!(chunks.len() > 1, "Expected multiple chunks for 128KB content");
+
+        // Verify timing increases monotonically
+        for i in 1..chunks.len() {
+            assert!(
+                chunks[i].target_time >= chunks[i-1].target_time,
+                "Chunk {} target_time should be >= previous chunk",
+                i
+            );
+        }
+
+        // Verify first chunk starts at TTFB
+        assert_eq!(chunks[0].target_time, resource.ttfb_ms);
+
+        // Verify target_close_time is after last chunk
+        if let Some(last_chunk) = chunks.last() {
+            assert!(
+                target_close_time >= last_chunk.target_time,
+                "target_close_time should be >= last chunk's target_time"
+            );
+        }
+
+        // Simulate timing: measure relative delays between chunks
+        let _start = Instant::now();
+        let mut last_time = 0u64;
+
+        for (i, chunk) in chunks.iter().enumerate() {
+            let relative_delay = chunk.target_time - last_time;
+
+            // For testing, we just verify the calculation is reasonable
+            // (not testing actual sleep timing here)
+            if i > 0 {
+                assert!(relative_delay > 0, "Chunk {} should have positive delay from previous", i);
+
+                // Based on 64KB chunks at 1 Mbps:
+                // 64KB = 65536 bytes = 524288 bits
+                // 1 Mbps = 1000000 bits/sec
+                // Expected time: ~524ms
+                // Allow for some variance
+                assert!(
+                    relative_delay >= 400 && relative_delay <= 700,
+                    "Chunk {} delay {}ms is outside expected range (400-700ms) for 64KB at 1Mbps",
+                    i, relative_delay
+                );
+            }
+
+            last_time = chunk.target_time;
+        }
+
+        // Verify total time matches content size and bandwidth
+        // 1 Mbps = 1,000,000 bits/sec = 125,000 bytes/sec = 125 bytes/ms
+        let bytes_per_ms = 1.0 * 1000.0 * 1000.0 / 8.0 / 1000.0; // = 125 bytes/ms
+        let expected_total_time = (content.len() as f64 / bytes_per_ms) as u64;
+        let actual_total_time = target_close_time - resource.ttfb_ms;
+
+        // Allow 10% tolerance for rounding
+        let tolerance = (expected_total_time as f64 * 0.1) as u64;
+        assert!(
+            actual_total_time >= expected_total_time - tolerance
+                && actual_total_time <= expected_total_time + tolerance,
+            "Total transfer time {}ms should be within 10% of expected {}ms",
+            actual_total_time, expected_total_time
+        );
+    }
+
+    #[test]
+    fn test_chunk_timing_calculation() {
+        use crate::playback::transaction::create_chunks;
+
+        // Test with different bandwidths
+        let test_cases = vec![
+            (1.0, 1024, 100),    // 1 Mbps, 1KB, 100ms TTFB
+            (10.0, 10240, 50),   // 10 Mbps, 10KB, 50ms TTFB
+            (0.5, 512, 200),     // 0.5 Mbps, 512B, 200ms TTFB
+        ];
+
+        for (mbps, content_size, ttfb) in test_cases {
+            let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
+            resource.ttfb_ms = ttfb;
+            resource.mbps = Some(mbps);
+
+            let content = vec![0u8; content_size];
+            let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
+
+            // Verify first chunk timing
+            assert_eq!(chunks[0].target_time, ttfb);
+
+            // Verify target_close_time is reasonable
+            // Mbps to bytes/ms: mbps * 1,000,000 bits/sec / 8 bits/byte / 1000 ms/sec
+            let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0;
+            let expected_transfer_time = (content_size as f64 / bytes_per_ms) as u64;
+            let expected_close_time = ttfb + expected_transfer_time;
+
+            assert_eq!(
+                target_close_time, expected_close_time,
+                "For {}Mbps, {}B content: expected close time {}ms, got {}ms",
+                mbps, content_size, expected_close_time, target_close_time
+            );
+        }
     }
 }

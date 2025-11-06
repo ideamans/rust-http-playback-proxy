@@ -20,7 +20,7 @@ mod tests {
         
         let mut inventory = Inventory::new();
         let mut resource = Resource::new("GET".to_string(), "https://example.com/test.txt".to_string());
-        resource.content_file_path = Some("get/https/example.com/test.txt".to_string());
+        resource.content_file_path = Some("contents/get/https/example.com/test.txt".to_string());
         resource.status_code = Some(200);
         resource.ttfb_ms = 100;
         resource.mbps = Some(2.0);
@@ -114,19 +114,22 @@ mod tests {
         let mut resource = Resource::new("GET".to_string(), "https://example.com/large-file".to_string());
         resource.ttfb_ms = 100;
         resource.mbps = Some(1.0); // 1 Mbps = 1024*1024 bits/sec = 128 KB/s
-        
+
         let content = vec![0u8; 1024]; // 1KB content
-        let chunks = create_chunks(&content, &resource).unwrap();
-        
+        let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
+
         assert!(!chunks.is_empty());
-        
+
         // First chunk should start at ttfb
         assert_eq!(chunks[0].target_time, 100);
-        
+
         // Each subsequent chunk should have a later target_time
         for i in 1..chunks.len() {
             assert!(chunks[i].target_time > chunks[i-1].target_time);
         }
+
+        // target_close_time should be greater than ttfb
+        assert!(target_close_time >= resource.ttfb_ms);
     }
 
     #[test]
@@ -181,11 +184,13 @@ mod tests {
     fn test_empty_content_chunks() {
         let resource = Resource::new("GET".to_string(), "https://example.com/empty".to_string());
         let empty_content = b"";
-        
-        let chunks = create_chunks(empty_content, &resource).unwrap();
-        
+
+        let (chunks, target_close_time) = create_chunks(empty_content, &resource).unwrap();
+
         // Empty content should result in empty chunks
         assert!(chunks.is_empty());
+        // target_close_time should equal ttfb for empty content
+        assert_eq!(target_close_time, resource.ttfb_ms);
     }
 
     #[tokio::test]
@@ -206,23 +211,28 @@ mod tests {
         assert!(result.is_none());
     }
 
-    #[test] 
+    #[test]
     fn test_chunk_target_times() {
         let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
         resource.ttfb_ms = 50;
         resource.mbps = Some(2.0); // 2 Mbps
-        
+
         let content = vec![0u8; 2048]; // 2KB content
-        let chunks = create_chunks(&content, &resource).unwrap();
-        
+        let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
+
         // All target times should be >= ttfb
         for chunk in &chunks {
             assert!(chunk.target_time >= resource.ttfb_ms);
         }
-        
+
         // Target times should be increasing
         for i in 1..chunks.len() {
             assert!(chunks[i].target_time >= chunks[i-1].target_time);
+        }
+
+        // target_close_time should be greater than all chunk times
+        if !chunks.is_empty() {
+            assert!(target_close_time >= chunks.last().unwrap().target_time);
         }
     }
 }
