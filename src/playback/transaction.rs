@@ -110,8 +110,9 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
     let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0; // Bytes per millisecond
 
     let mut offset = 0;
-    // Start at 0 since TTFB is handled separately - chunks are relative to after TTFB
-    let mut current_time = 0;
+    // Start at TTFB - chunks are absolute times from request arrival
+    let ttfb = resource.ttfb_ms;
+    let mut current_time = ttfb;
 
     while offset < total_size {
         let chunk_size = std::cmp::min(CHUNK_SIZE, total_size - offset);
@@ -128,9 +129,9 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
         offset += chunk_size;
     }
 
-    // Calculate target_close_time: total transfer time (TTFB handled separately)
+    // Calculate target_close_time: TTFB + total transfer time
     let total_transfer_time_ms = (total_size as f64 / bytes_per_ms) as u64;
-    let target_close_time = total_transfer_time_ms;
+    let target_close_time = ttfb + total_transfer_time_ms;
 
     Ok((chunks, target_close_time))
 }

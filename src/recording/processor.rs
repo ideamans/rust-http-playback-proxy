@@ -119,9 +119,17 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         let beautified = self.beautify_content(&utf8_content, &resource.content_type_mime)?;
         let beautified_lines = beautified.lines().count();
 
-        resource.minify = Some(beautified_lines >= original_lines * 2);
+        let is_minified = beautified_lines >= original_lines * 2;
+        resource.minify = Some(is_minified);
 
         // Save content to file
+        // If minified, save the beautified version for better editability
+        let content_to_save = if is_minified {
+            beautified
+        } else {
+            utf8_content
+        };
+
         let file_path = generate_file_path_from_url(&resource.url, &resource.method)?;
         let full_path = self.contents_dir.join(&file_path);
 
@@ -129,7 +137,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
             self.file_system.create_dir_all(parent).await?;
         }
 
-        self.file_system.write(&full_path, utf8_content.as_bytes()).await?;
+        self.file_system.write(&full_path, content_to_save.as_bytes()).await?;
         // Store path relative to inventory dir (with "contents/" prefix)
         resource.content_file_path = Some(format!("contents/{}", file_path));
 

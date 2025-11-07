@@ -55,7 +55,7 @@ async fn handle_playback_request(
     let uri = req.uri().clone();
     let headers = req.headers();
 
-    // Reconstruct full URL from URI and Host header
+    // Reconstruct full URL from URI and Host header (including query parameters)
     let url = if uri.scheme().is_some() {
         // Full URL in request (proxy-style)
         uri.to_string()
@@ -64,7 +64,12 @@ async fn handle_playback_request(
         if let Some(host) = headers.get("host") {
             if let Ok(host_str) = host.to_str() {
                 // Use https by default for recorded resources
-                format!("https://{}{}", host_str, uri.path())
+                // Include query parameters if present
+                if let Some(query) = uri.query() {
+                    format!("https://{}{}?{}", host_str, uri.path(), query)
+                } else {
+                    format!("https://{}{}", host_str, uri.path())
+                }
             } else {
                 uri.to_string()
             }
@@ -118,8 +123,8 @@ async fn serve_transaction(
 ) -> Result<Response<http_body_util::combinators::BoxBody<bytes::Bytes, std::io::Error>>> {
     use http_body_util::BodyExt;
 
-    // Wait for TTFB (this is a duration from request arrival, not a timestamp)
-    tokio::time::sleep(Duration::from_millis(transaction.ttfb)).await;
+    // Record request arrival time
+    let request_instant = Instant::now();
 
     // If there's an error message, return error response
     if let Some(error_msg) = &transaction.error_message {
@@ -144,9 +149,9 @@ async fn serve_transaction(
     }
 
     // Create streaming body with timing control
+    // Chunks have target_time as absolute time from request arrival (including TTFB)
     let chunks = transaction.chunks.clone();
     let target_close_time = transaction.target_close_time;
-    let request_instant = Instant::now();
 
     let stream = stream::unfold(
         (chunks.into_iter(), request_instant, target_close_time, false),

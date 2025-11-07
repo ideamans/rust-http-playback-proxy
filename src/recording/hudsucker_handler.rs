@@ -8,7 +8,7 @@ use std::time::Instant;
 use std::future::Future;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use std::collections::HashMap;
+use std::collections::VecDeque;
 
 use crate::types::{Inventory, Resource};
 use super::processor::RequestProcessor;
@@ -28,7 +28,7 @@ pub struct RecordingHandler {
     shared_inventory: Arc<Mutex<Inventory>>,
     processor: Arc<RequestProcessor<RealFileSystem, RealTimeProvider>>,
     start_time: Arc<Instant>,
-    request_infos: Arc<Mutex<HashMap<String, RequestInfo>>>,
+    request_infos: Arc<Mutex<VecDeque<(String, RequestInfo)>>>,
     request_counter: Arc<Mutex<u64>>,
 }
 
@@ -44,7 +44,7 @@ impl RecordingHandler {
             shared_inventory: Arc::new(Mutex::new(inventory)),
             processor,
             start_time: Arc::new(Instant::now()),
-            request_infos: Arc::new(Mutex::new(HashMap::new())),
+            request_infos: Arc::new(Mutex::new(VecDeque::new())),
             request_counter: Arc::new(Mutex::new(0)),
         }
     }
@@ -88,14 +88,19 @@ impl HttpHandler for RecordingHandler {
             let request_start = Instant::now();
             let elapsed_since_start = request_start.duration_since(*start_time).as_millis() as u64;
 
-            // Reconstruct full URL
+            // Reconstruct full URL (including query parameters)
             let url = if uri.scheme().is_some() {
                 uri.to_string()
             } else {
                 // Reconstruct from Host header
                 if let Some(host) = headers.get("host") {
                     if let Ok(host_str) = host.to_str() {
-                        format!("https://{}{}", host_str, uri.path())
+                        // Include query parameters if present
+                        if let Some(query) = uri.query() {
+                            format!("https://{}{}?{}", host_str, uri.path(), query)
+                        } else {
+                            format!("https://{}{}", host_str, uri.path())
+                        }
                     } else {
                         uri.to_string()
                     }
@@ -105,15 +110,15 @@ impl HttpHandler for RecordingHandler {
             };
 
             // Store request information for correlation with response
-            // Use URL as key (FIFO - first in, first out for matching)
+            // Use VecDeque to maintain FIFO order
             {
                 let mut infos = request_infos.lock().await;
-                infos.insert(request_id.to_string(), RequestInfo {
+                infos.push_back((request_id.to_string(), RequestInfo {
                     method: method.to_string(),
                     url: url.clone(),
                     request_start,
                     elapsed_since_start,
-                });
+                }));
             }
 
             // DON'T modify request - just pass it through unchanged
@@ -156,18 +161,18 @@ impl HttpHandler for RecordingHandler {
             // Find matching request info (FIFO - get the oldest/first request)
             let request_info = {
                 let mut infos = request_infos.lock().await;
-                // Get the first entry (oldest request)
-                let first_key = infos.keys().next().cloned();
-                first_key.and_then(|key| infos.remove(&key))
+                // Pop the first entry (oldest request) from the queue
+                infos.pop_front().map(|(_, info)| info)
             };
 
             let (method_str, url, ttfb_ms) = if let Some(info) = request_info {
-                // Calculate TTFB relative to request start
+                // Calculate TTFB relative to request start (pure TTFB duration)
                 let ttfb = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
-                let ttfb_ms = info.elapsed_since_start + ttfb;
+                // Store only the pure TTFB, not the absolute time
+                let ttfb_ms = ttfb;
 
-                info!("Matched response with request: {} {} (TTFB: {}ms)",
-                      info.method, info.url, ttfb);
+                info!("Matched response with request: {} {} (TTFB: {}ms, request offset: {}ms)",
+                      info.method, info.url, ttfb, info.elapsed_since_start);
 
                 (info.method, info.url, ttfb_ms)
             } else {
