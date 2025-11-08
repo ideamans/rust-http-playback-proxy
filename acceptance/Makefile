@@ -1,20 +1,28 @@
-.PHONY: help test-all test-performance test-minimum test-typescript test-golang clean
+.PHONY: help build test-all test-performance test-minimum test-typescript test-golang clean
 
 # Default target
 help:
 	@echo "HTTP Playback Proxy - Acceptance Tests"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make test-all         - Run all acceptance tests"
+	@echo "  make build            - Build main http-playback-proxy binary"
+	@echo "  make test-all         - Run all acceptance tests (with build)"
 	@echo "  make test-performance - Run performance acceptance test"
 	@echo "  make test-minimum     - Run minimum timing acceptance test"
-	@echo "  make test-typescript  - Run TypeScript acceptance test"
-	@echo "  make test-golang      - Run Golang acceptance test"
+	@echo "  make test-typescript  - Run TypeScript acceptance test (with build)"
+	@echo "  make test-golang      - Run Golang acceptance test (with build)"
 	@echo "  make clean            - Clean all build artifacts"
 	@echo ""
 
+# Build main binary
+build:
+	@echo "Building main http-playback-proxy binary..."
+	@cd .. && cargo build --release
+	@echo "Main binary built successfully"
+	@echo ""
+
 # Run all acceptance tests
-test-all: test-performance test-minimum test-typescript test-golang
+test-all: build test-performance test-minimum test-typescript test-golang
 	@echo ""
 	@echo "=========================================="
 	@echo "  ALL ACCEPTANCE TESTS PASSED!"
@@ -35,15 +43,15 @@ test-minimum:
 	@echo ""
 	@cd minimum && ./run.sh
 
-# TypeScript acceptance test
-test-typescript:
+# TypeScript acceptance test (requires latest binary)
+test-typescript: build
 	@echo ""
 	@echo "=== Running TypeScript Acceptance Test ==="
 	@echo ""
 	@cd typescript && npm install && npm test
 
-# Golang acceptance test
-test-golang:
+# Golang acceptance test (requires latest binary)
+test-golang: build
 	@echo ""
 	@echo "=== Running Golang Acceptance Test ==="
 	@echo ""
