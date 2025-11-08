@@ -1,4 +1,5 @@
 use anyhow::Result;
+use hyper::StatusCode;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
@@ -145,10 +146,10 @@ p {
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('DOM content loaded');
-    
+
     const h1 = document.querySelector('h1');
     if (h1) {
-        h1.style.color = '#0066cc'; 
+        h1.style.color = '#0066cc';
     }
 });"#;
 
@@ -158,6 +159,65 @@ document.addEventListener('DOMContentLoaded', function() {
                     .body(Full::new(bytes::Bytes::from(js)))
                     .unwrap())
             }
+
+            // Compressed content (gzip)
+            "/compressed.txt" => {
+                use flate2::Compression;
+                use flate2::write::GzEncoder;
+                use std::io::Write;
+
+                let text = "This is compressed content for testing gzip encoding.";
+                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+                encoder.write_all(text.as_bytes()).unwrap();
+                let compressed = encoder.finish().unwrap();
+
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "text/plain; charset=utf-8")
+                    .header("Content-Encoding", "gzip")
+                    .body(Full::new(bytes::Bytes::from(compressed)))
+                    .unwrap())
+            }
+
+            // Compressed content (brotli)
+            "/compressed-br.txt" => {
+                use brotli::enc::BrotliEncoderParams;
+                use std::io::Write;
+
+                let text = "This is brotli compressed content for testing.";
+                let mut compressed = Vec::new();
+                let params = BrotliEncoderParams::default();
+                let mut writer =
+                    brotli::CompressorWriter::with_params(&mut compressed, 4096, &params);
+                writer.write_all(text.as_bytes()).unwrap();
+                writer.flush().unwrap();
+                drop(writer);
+
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", "text/plain; charset=utf-8")
+                    .header("Content-Encoding", "br")
+                    .body(Full::new(bytes::Bytes::from(compressed)))
+                    .unwrap())
+            }
+
+            // 404 error
+            "/not-found" => Ok(Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .header("Content-Type", "text/html; charset=utf-8")
+                .body(Full::new(bytes::Bytes::from(
+                    "<html><body><h1>404 Not Found</h1></body></html>",
+                )))
+                .unwrap()),
+
+            // 500 error
+            "/server-error" => Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header("Content-Type", "text/html; charset=utf-8")
+                .body(Full::new(bytes::Bytes::from(
+                    "<html><body><h1>500 Internal Server Error</h1></body></html>",
+                )))
+                .unwrap()),
 
             _ => Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
@@ -620,4 +680,406 @@ async fn test_recording_and_playback_integration() {
     let _ = playback_proxy.wait();
 
     println!("Integration test completed successfully!");
+}
+
+#[tokio::test]
+async fn test_recording_error_responses() {
+    // Build binary if needed
+    ensure_binary_built().await.expect("Failed to build binary");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let inventory_dir = temp_dir.path().to_path_buf();
+
+    // Start static web server
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to start static server");
+    let server_url = static_server.url();
+
+    let recording_proxy_port = find_free_port().expect("Failed to find free port");
+    let playback_proxy_port = find_free_port().expect("Failed to find free port");
+
+    // Start recording proxy
+    let mut recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+        .await
+        .expect("Failed to start recording proxy");
+
+    let client = http_client_with_proxy(recording_proxy_port).await;
+
+    // Request 404 error
+    let not_found_url = format!("{}/not-found", server_url);
+    let response = client
+        .get(&not_found_url)
+        .send()
+        .await
+        .expect("Request failed");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let not_found_content = response.text().await.expect("Failed to read response");
+    assert!(not_found_content.contains("404 Not Found"));
+
+    // Request 500 error
+    let error_url = format!("{}/server-error", server_url);
+    let response = client.get(&error_url).send().await.expect("Request failed");
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let error_content = response.text().await.expect("Failed to read response");
+    assert!(error_content.contains("500 Internal Server Error"));
+
+    // Stop recording proxy gracefully
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+        }
+        sleep(Duration::from_secs(3)).await;
+        let _ = recording_proxy.wait();
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = recording_proxy.kill();
+        let _ = recording_proxy.wait();
+        sleep(Duration::from_millis(2000)).await;
+    }
+
+    static_server.shutdown();
+
+    // Verify inventory was created
+    let inventory_file = inventory_dir.join("inventory.json");
+    assert!(inventory_file.exists(), "inventory.json should exist");
+
+    // Parse and verify error responses were recorded
+    let inventory_content = tokio::fs::read_to_string(&inventory_file)
+        .await
+        .expect("Failed to read inventory.json");
+    let inventory: serde_json::Value =
+        serde_json::from_str(&inventory_content).expect("Failed to parse inventory.json");
+
+    let resources = inventory["resources"]
+        .as_array()
+        .expect("resources should be an array");
+
+    // Find 404 resource
+    let not_found_resource = resources
+        .iter()
+        .find(|r| r["statusCode"] == 404)
+        .expect("Should have 404 resource");
+    assert_eq!(not_found_resource["statusCode"], 404);
+
+    // Find 500 resource
+    let error_resource = resources
+        .iter()
+        .find(|r| r["statusCode"] == 500)
+        .expect("Should have 500 resource");
+    assert_eq!(error_resource["statusCode"], 500);
+
+    // Start playback proxy
+    let mut playback_proxy = start_playback_proxy(playback_proxy_port, &inventory_dir)
+        .await
+        .expect("Failed to start playback proxy");
+
+    let playback_client = http_client_with_proxy(playback_proxy_port).await;
+
+    // Verify 404 is replayed correctly
+    let response = playback_client
+        .get(&not_found_url)
+        .send()
+        .await
+        .expect("Playback request failed");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let playback_content = response
+        .text()
+        .await
+        .expect("Failed to read playback response");
+    assert!(playback_content.contains("404 Not Found"));
+
+    // Verify 500 is replayed correctly
+    let response = playback_client
+        .get(&error_url)
+        .send()
+        .await
+        .expect("Playback request failed");
+    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let playback_content = response
+        .text()
+        .await
+        .expect("Failed to read playback response");
+    assert!(playback_content.contains("500 Internal Server Error"));
+
+    // Stop playback proxy
+    let _ = playback_proxy.kill();
+    let _ = playback_proxy.wait();
+
+    println!("Error responses test completed successfully!");
+}
+
+#[tokio::test]
+async fn test_recording_with_compression() {
+    // Build binary if needed
+    ensure_binary_built().await.expect("Failed to build binary");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let inventory_dir = temp_dir.path().to_path_buf();
+
+    // Start static web server
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to start static server");
+    let server_url = static_server.url();
+
+    let recording_proxy_port = find_free_port().expect("Failed to find free port");
+    let playback_proxy_port = find_free_port().expect("Failed to find free port");
+
+    // Start recording proxy
+    let mut recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+        .await
+        .expect("Failed to start recording proxy");
+
+    let client = http_client_with_proxy(recording_proxy_port).await;
+
+    // Request gzip compressed content
+    // Note: reqwest automatically decompresses, so we just verify the request succeeds
+    let gzip_url = format!("{}/compressed.txt", server_url);
+    let response = client.get(&gzip_url).send().await.expect("Request failed");
+    assert!(response.status().is_success());
+    let _gzip_content = response.text().await.expect("Failed to read response");
+
+    // Request brotli compressed content
+    let br_url = format!("{}/compressed-br.txt", server_url);
+    let response = client.get(&br_url).send().await.expect("Request failed");
+    assert!(response.status().is_success());
+    let _br_content = response.text().await.expect("Failed to read response");
+
+    // Stop recording proxy gracefully
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+        }
+        sleep(Duration::from_secs(3)).await;
+        let _ = recording_proxy.wait();
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = recording_proxy.kill();
+        let _ = recording_proxy.wait();
+        sleep(Duration::from_millis(2000)).await;
+    }
+
+    static_server.shutdown();
+
+    // Verify inventory was created
+    let inventory_file = inventory_dir.join("inventory.json");
+    assert!(inventory_file.exists(), "inventory.json should exist");
+
+    // Parse and verify compressed resources were recorded with correct encoding
+    let inventory_content = tokio::fs::read_to_string(&inventory_file)
+        .await
+        .expect("Failed to read inventory.json");
+    let inventory: serde_json::Value =
+        serde_json::from_str(&inventory_content).expect("Failed to parse inventory.json");
+
+    let resources = inventory["resources"]
+        .as_array()
+        .expect("resources should be an array");
+
+    // Find gzip resource
+    let gzip_resource = resources
+        .iter()
+        .find(|r| r["url"].as_str().unwrap_or("").contains("/compressed.txt"))
+        .expect("Should have gzip compressed resource");
+    assert_eq!(
+        gzip_resource["contentEncoding"], "gzip",
+        "Content encoding should be gzip"
+    );
+
+    // Find brotli resource
+    let br_resource = resources
+        .iter()
+        .find(|r| {
+            r["url"]
+                .as_str()
+                .unwrap_or("")
+                .contains("/compressed-br.txt")
+        })
+        .expect("Should have brotli compressed resource");
+    assert_eq!(
+        br_resource["contentEncoding"], "br",
+        "Content encoding should be br"
+    );
+
+    // Start playback proxy
+    let mut playback_proxy = start_playback_proxy(playback_proxy_port, &inventory_dir)
+        .await
+        .expect("Failed to start playback proxy");
+
+    let playback_client = http_client_with_proxy(playback_proxy_port).await;
+
+    // Verify gzip content is replayed correctly (just verify success)
+    let response = playback_client
+        .get(&gzip_url)
+        .send()
+        .await
+        .expect("Playback request failed");
+    assert!(
+        response.status().is_success(),
+        "Gzip playback should succeed"
+    );
+    let _playback_gzip = response
+        .text()
+        .await
+        .expect("Failed to read playback response");
+
+    // Verify brotli content is replayed correctly (just verify success)
+    let response = playback_client
+        .get(&br_url)
+        .send()
+        .await
+        .expect("Playback request failed");
+    assert!(
+        response.status().is_success(),
+        "Brotli playback should succeed"
+    );
+    let _playback_br = response
+        .text()
+        .await
+        .expect("Failed to read playback response");
+
+    // Stop playback proxy
+    let _ = playback_proxy.kill();
+    let _ = playback_proxy.wait();
+
+    println!("Compression test completed successfully!");
+}
+
+#[tokio::test]
+async fn test_inventory_structure_validation() {
+    // Build binary if needed
+    ensure_binary_built().await.expect("Failed to build binary");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let inventory_dir = temp_dir.path().to_path_buf();
+
+    // Start static web server
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to start static server");
+    let server_url = static_server.url();
+
+    let recording_proxy_port = find_free_port().expect("Failed to find free port");
+
+    // Start recording proxy with entry URL
+    let mut recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+        .await
+        .expect("Failed to start recording proxy");
+
+    let client = http_client_with_proxy(recording_proxy_port).await;
+
+    // Make some requests
+    let _ = client.get(&server_url).send().await;
+    let _ = client.get(format!("{}/style.css", server_url)).send().await;
+
+    // Stop recording proxy gracefully
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+        }
+        sleep(Duration::from_secs(3)).await;
+        let _ = recording_proxy.wait();
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = recording_proxy.kill();
+        let _ = recording_proxy.wait();
+        sleep(Duration::from_millis(2000)).await;
+    }
+
+    static_server.shutdown();
+
+    // Validate inventory structure
+    let inventory_file = inventory_dir.join("inventory.json");
+    assert!(inventory_file.exists(), "inventory.json must exist");
+
+    let inventory_content = tokio::fs::read_to_string(&inventory_file)
+        .await
+        .expect("Failed to read inventory.json");
+    let inventory: serde_json::Value =
+        serde_json::from_str(&inventory_content).expect("Failed to parse inventory.json");
+
+    // Validate top-level structure
+    assert!(inventory.is_object(), "Inventory must be an object");
+    assert!(
+        inventory["deviceType"].is_string(),
+        "deviceType must be present"
+    );
+    assert_eq!(
+        inventory["deviceType"], "desktop",
+        "deviceType should be desktop"
+    );
+
+    // Validate resources array
+    let resources = inventory["resources"]
+        .as_array()
+        .expect("resources must be an array");
+    assert!(!resources.is_empty(), "resources array must not be empty");
+
+    // Validate each resource has required fields
+    for (i, resource) in resources.iter().enumerate() {
+        assert!(
+            resource["method"].is_string(),
+            "Resource {} must have method",
+            i
+        );
+        assert!(resource["url"].is_string(), "Resource {} must have url", i);
+        assert!(
+            resource["ttfbMs"].is_number(),
+            "Resource {} must have ttfbMs",
+            i
+        );
+        assert!(
+            resource["statusCode"].is_number(),
+            "Resource {} must have statusCode",
+            i
+        );
+
+        // Check TTFB is non-negative
+        let ttfb = resource["ttfbMs"].as_f64().unwrap();
+        assert!(ttfb >= 0.0, "Resource {} ttfbMs must be non-negative", i);
+
+        // Check status code is valid HTTP status
+        let status = resource["statusCode"].as_u64().unwrap();
+        assert!(
+            (100..600).contains(&status),
+            "Resource {} statusCode must be valid HTTP status code",
+            i
+        );
+
+        // Validate content file path or content fields exist
+        let has_file_path = resource["contentFilePath"].is_string();
+        let has_utf8 = resource["contentUtf8"].is_string();
+        let has_base64 = resource["contentBase64"].is_string();
+        assert!(
+            has_file_path || has_utf8 || has_base64,
+            "Resource {} must have at least one content field",
+            i
+        );
+    }
+
+    // Validate contents directory structure
+    let contents_dir = inventory_dir.join("contents");
+    assert!(contents_dir.exists(), "contents directory must exist");
+    assert!(contents_dir.is_dir(), "contents must be a directory");
+
+    // Check that content files exist for resources with contentFilePath
+    for resource in resources {
+        if let Some(file_path) = resource["contentFilePath"].as_str() {
+            let full_path = inventory_dir.join(file_path);
+            assert!(
+                full_path.exists(),
+                "Content file must exist: {}",
+                full_path.display()
+            );
+        }
+    }
+
+    println!("Inventory structure validation completed successfully!");
 }
