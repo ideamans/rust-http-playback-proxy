@@ -165,26 +165,28 @@ impl HttpHandler for RecordingHandler {
                 infos.pop_front().map(|(_, info)| info)
             };
 
-            let (method_str, url, ttfb_ms) = if let Some(info) = request_info {
+            let (method_str, url, ttfb_ms, download_end_ms) = if let Some(info) = request_info {
                 // Calculate TTFB relative to request start (pure TTFB duration)
                 let ttfb = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
                 // Store only the pure TTFB, not the absolute time
                 let ttfb_ms = ttfb;
 
-                info!("Matched response with request: {} {} (TTFB: {}ms, request offset: {}ms)",
-                      info.method, info.url, ttfb, info.elapsed_since_start);
+                // Calculate download end time relative to request start (not proxy start)
+                let download_end = Instant::now();
+                let download_end_ms = download_end.duration_since(info.request_start).as_millis() as u64;
 
-                (info.method, info.url, ttfb_ms)
+                info!("Matched response with request: {} {} (TTFB: {}ms, download_end: {}ms, request offset: {}ms)",
+                      info.method, info.url, ttfb, download_end_ms, info.elapsed_since_start);
+
+                (info.method, info.url, ttfb_ms, download_end_ms)
             } else {
                 // Fallback
                 error!("No matching request info found for response");
                 let elapsed = ttfb_instant.duration_since(*start_time).as_millis() as u64;
-                ("GET".to_string(), "unknown".to_string(), elapsed)
+                let download_end = Instant::now();
+                let download_end_elapsed = download_end.duration_since(*start_time).as_millis() as u64;
+                ("GET".to_string(), "unknown".to_string(), elapsed, download_end_elapsed)
             };
-
-            // Calculate download end time
-            let download_end = Instant::now();
-            let download_end_ms = download_end.duration_since(*start_time).as_millis() as u64;
 
             // Create resource
             let mut resource = Resource::new(method_str, url.clone());

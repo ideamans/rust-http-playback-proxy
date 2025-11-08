@@ -103,16 +103,23 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
         return Ok((chunks, 0));
     }
 
-    // Calculate timing based on mbps or use default
-    let mbps = resource.mbps.unwrap_or(TARGET_MBPS);
-    // Mbps (megabits per second) to bytes per millisecond:
-    // mbps * 1,000,000 bits/sec / 8 bits/byte / 1000 ms/sec = mbps * 125 bytes/ms
-    let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0; // Bytes per millisecond
+    // Use actual recorded transfer duration (download_end_ms - ttfb_ms)
+    // This ensures we reproduce the exact timing from the recording
+    let transfer_duration_ms = if let Some(download_end_ms) = resource.download_end_ms {
+        download_end_ms.saturating_sub(resource.ttfb_ms)
+    } else {
+        // Fallback: calculate from mbps if download_end_ms is not available
+        let mbps = resource.mbps.unwrap_or(TARGET_MBPS);
+        let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0;
+        (total_size as f64 / bytes_per_ms) as u64
+    };
+
+    // If transfer duration is 0, make it at least 1ms to avoid division by zero
+    let transfer_duration_ms = std::cmp::max(1, transfer_duration_ms);
 
     let mut offset = 0;
-    // Start at TTFB - chunks are absolute times from request arrival
-    let ttfb = resource.ttfb_ms;
-    let mut current_time = ttfb;
+    // Start at 0 - chunks are relative times from TTFB (TTFB is waited separately in proxy.rs)
+    let mut current_time = 0u64;
 
     while offset < total_size {
         let chunk_size = std::cmp::min(CHUNK_SIZE, total_size - offset);
@@ -123,15 +130,15 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
             target_time: current_time,
         });
 
-        // Calculate time for next chunk
-        let chunk_duration_ms = (chunk_size as f64 / bytes_per_ms) as u64;
+        // Calculate time for next chunk based on proportional distribution
+        // Each chunk gets its share of the total transfer time based on its size
+        let chunk_duration_ms = ((chunk_size as f64 / total_size as f64) * transfer_duration_ms as f64) as u64;
         current_time += chunk_duration_ms;
         offset += chunk_size;
     }
 
-    // Calculate target_close_time: TTFB + total transfer time
-    let total_transfer_time_ms = (total_size as f64 / bytes_per_ms) as u64;
-    let target_close_time = ttfb + total_transfer_time_ms;
+    // target_close_time is the total transfer duration (relative to TTFB completion)
+    let target_close_time = transfer_duration_ms;
 
     Ok((chunks, target_close_time))
 }

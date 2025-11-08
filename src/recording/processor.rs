@@ -54,16 +54,19 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
             self.process_binary_resource(resource, &decompressed_body).await?;
         }
 
-        // Calculate mbps (excluding latency/TTFB)
-        // Mbps = (body_size / download_time) / (1024 * 1024)
+        // Calculate mbps (megabits per second) from compressed body size
+        // This is the actual network transfer speed, excluding latency/TTFB
         // where download_time = download_end_ms - ttfb_ms
-        let body_size = decompressed_body.len() as f64;
+        let body_size = body.len() as f64; // Use compressed body size (what was actually transferred)
         if let Some(download_end_ms) = resource.download_end_ms {
             if download_end_ms > resource.ttfb_ms {
                 let download_time_ms = download_end_ms - resource.ttfb_ms;
                 let seconds = (download_time_ms as f64) / 1000.0;
                 if seconds > 0.0 {
-                    resource.mbps = Some((body_size / seconds) / (1024.0 * 1024.0));
+                    // bytes/s -> bits/s -> Mb/s (megabits per second)
+                    let bytes_per_second = body_size / seconds;
+                    let bits_per_second = bytes_per_second * 8.0;
+                    resource.mbps = Some(bits_per_second / (1000.0 * 1000.0));
                 }
             }
         }

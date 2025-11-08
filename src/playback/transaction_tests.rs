@@ -120,16 +120,16 @@ mod tests {
 
         assert!(!chunks.is_empty());
 
-        // First chunk should start at ttfb
-        assert_eq!(chunks[0].target_time, 100);
+        // First chunk should start at 0 (relative to TTFB)
+        assert_eq!(chunks[0].target_time, 0);
 
         // Each subsequent chunk should have a later target_time
         for i in 1..chunks.len() {
             assert!(chunks[i].target_time > chunks[i-1].target_time);
         }
 
-        // target_close_time should be greater than ttfb
-        assert!(target_close_time >= resource.ttfb_ms);
+        // target_close_time should be positive (relative to TTFB)
+        assert!(target_close_time > 0);
     }
 
     #[test]
@@ -220,10 +220,13 @@ mod tests {
         let content = vec![0u8; 2048]; // 2KB content
         let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
 
-        // All target times should be >= ttfb
+        // All target times should be >= 0 (relative to TTFB)
         for chunk in &chunks {
-            assert!(chunk.target_time >= resource.ttfb_ms);
+            assert!(chunk.target_time >= 0);
         }
+
+        // First chunk should start at 0
+        assert_eq!(chunks[0].target_time, 0);
 
         // Target times should be increasing
         for i in 1..chunks.len() {

@@ -6,8 +6,12 @@
 /typescript/package-lock.json
 
 # Acceptance test artifacts
-/accept/golang/inventory/
-/accept/typescript/inventory/
-/accept/typescript/node_modules/
-/accept/typescript/package-lock.json
-/accept/golang/go.sum
+/acceptance/golang/inventory/
+/acceptance/typescript/inventory/
+/acceptance/typescript/node_modules/
+/acceptance/typescript/package-lock.json
+/acceptance/golang/go.sum
+/acceptance/performance/target/
+/acceptance/performance/Cargo.lock
+/acceptance/minimum/target/
+/acceptance/minimum/Cargo.lock

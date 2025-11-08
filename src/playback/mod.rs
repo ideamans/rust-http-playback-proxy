@@ -15,11 +15,13 @@ mod transaction_tests;
 #[cfg(test)]
 mod inventory_tests;
 
-pub async fn run_playback_mode(port: Option<u16>, inventory_dir: PathBuf) -> Result<()> {
+pub async fn run_playback_mode(port: Option<u16>, inventory_dir: PathBuf, _ignore_tls_errors: bool) -> Result<()> {
     let port = get_port_or_default(port)?;
-    
+
     println!("Starting playback mode on port {}", port);
     println!("Inventory directory: {:?}", inventory_dir);
+
+    // Note: ignore_tls_errors is not needed in playback mode since we serve prerecorded responses
 
     // Load inventory
     let file_system = Arc::new(RealFileSystem);

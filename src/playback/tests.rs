@@ -133,10 +133,9 @@ use serde::Serialize;
 
         assert!(!chunks.is_empty());
 
-        // Verify that all chunks have target times >= ttfb
-        for chunk in &chunks {
-            assert!(chunk.target_time >= resource.ttfb_ms);
-        }
+        // Verify that chunk target times are relative to TTFB (0-based)
+        // First chunk should start at 0 (immediately after TTFB)
+        assert_eq!(chunks[0].target_time, 0);
 
         // Verify that combined chunks equal original content
         let mut combined = Vec::new();
@@ -145,8 +144,8 @@ use serde::Serialize;
         }
         assert_eq!(combined, content);
 
-        // Verify target_close_time is set appropriately
-        assert!(target_close_time >= resource.ttfb_ms);
+        // Verify target_close_time is set appropriately (relative to TTFB)
+        assert!(target_close_time > 0);
     }
 
     #[test]
@@ -218,8 +217,8 @@ use serde::Serialize;
             );
         }
 
-        // Verify first chunk starts at TTFB
-        assert_eq!(chunks[0].target_time, resource.ttfb_ms);
+        // Verify first chunk starts at 0 (relative to TTFB completion)
+        assert_eq!(chunks[0].target_time, 0);
 
         // Verify target_close_time is after last chunk
         if let Some(last_chunk) = chunks.last() {
@@ -260,7 +259,7 @@ use serde::Serialize;
         // 1 Mbps = 1,000,000 bits/sec = 125,000 bytes/sec = 125 bytes/ms
         let bytes_per_ms = 1.0 * 1000.0 * 1000.0 / 8.0 / 1000.0; // = 125 bytes/ms
         let expected_total_time = (content.len() as f64 / bytes_per_ms) as u64;
-        let actual_total_time = target_close_time - resource.ttfb_ms;
+        let actual_total_time = target_close_time; // target_close_time is already relative to TTFB
 
         // Allow 10% tolerance for rounding
         let tolerance = (expected_total_time as f64 * 0.1) as u64;
@@ -291,19 +290,18 @@ use serde::Serialize;
             let content = vec![0u8; content_size];
             let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
 
-            // Verify first chunk timing
-            assert_eq!(chunks[0].target_time, ttfb);
+            // Verify first chunk timing (relative to TTFB, so 0)
+            assert_eq!(chunks[0].target_time, 0);
 
-            // Verify target_close_time is reasonable
+            // Verify target_close_time is reasonable (relative to TTFB)
             // Mbps to bytes/ms: mbps * 1,000,000 bits/sec / 8 bits/byte / 1000 ms/sec
             let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0;
             let expected_transfer_time = (content_size as f64 / bytes_per_ms) as u64;
-            let expected_close_time = ttfb + expected_transfer_time;
 
             assert_eq!(
-                target_close_time, expected_close_time,
-                "For {}Mbps, {}B content: expected close time {}ms, got {}ms",
-                mbps, content_size, expected_close_time, target_close_time
+                target_close_time, expected_transfer_time,
+                "For {}Mbps, {}B content: expected transfer time {}ms, got {}ms",
+                mbps, content_size, expected_transfer_time, target_close_time
             );
         }
     }
