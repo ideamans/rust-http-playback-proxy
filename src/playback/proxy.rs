@@ -192,9 +192,24 @@ async fn serve_transaction(
     let mut response_builder = Response::builder()
         .status(transaction.status_code.unwrap_or(200));
 
-    // Add headers
+    // Add headers (skip hop-by-hop headers that Hyper manages automatically)
     if let Some(headers) = &transaction.raw_headers {
         for (key, value) in headers {
+            // Skip headers that Hyper manages automatically to avoid UnexpectedHeader error
+            let key_lower = key.to_lowercase();
+            if key_lower == "transfer-encoding"
+                || key_lower == "content-length"
+                || key_lower == "connection"
+                || key_lower == "keep-alive"
+                || key_lower == "upgrade"
+                || key_lower == "te"
+                || key_lower == "trailer"
+                || key_lower == "proxy-connection"
+                || key_lower == "proxy-authorization"
+                || key_lower == "proxy-authenticate"
+            {
+                continue; // Skip hop-by-hop headers
+            }
             response_builder = response_builder.header(key, value);
         }
     }

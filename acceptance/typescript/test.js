@@ -1,6 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
+import { URL } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
@@ -225,12 +226,13 @@ describe('HTTP Playback Proxy Acceptance Test', () => {
 });
 
 // Helper function to make HTTP request through proxy
+// Uses HTTP/1.1 proxy protocol (absolute URI in request line)
 function makeRequest(url, proxyHost, proxyPort) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: proxyHost,
       port: proxyPort,
-      path: url,  // Full URL for proxy request
+      path: url,  // Full URL for proxy request (absolute URI)
       method: 'GET',
       headers: {
         Host: new URL(url).host,  // Set Host header for target server
