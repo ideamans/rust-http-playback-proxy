@@ -1,10 +1,10 @@
 #[cfg(test)]
-mod tests {
+mod playback_tests {
     use crate::types::{ContentEncodingType, DeviceType, Inventory, Resource};
     use serde::Serialize;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use tokio;
+    
 
     #[tokio::test]
     async fn test_load_inventory() {
@@ -203,12 +203,12 @@ mod tests {
 
         // Test Gzip compression
         let compressed = compress_content(content, &ContentEncodingType::Gzip).unwrap();
-        assert!(compressed.len() > 0);
+        assert!(!compressed.is_empty());
         assert_ne!(compressed, content);
 
         // Test Deflate compression
         let compressed = compress_content(content, &ContentEncodingType::Deflate).unwrap();
-        assert!(compressed.len() > 0);
+        assert!(!compressed.is_empty());
         assert_ne!(compressed, content);
 
         // Test Identity (no compression)
@@ -278,7 +278,7 @@ mod tests {
                 // Expected time: ~524ms
                 // Allow for some variance
                 assert!(
-                    relative_delay >= 400 && relative_delay <= 700,
+                    (400..=700).contains(&relative_delay),
                     "Chunk {} delay {}ms is outside expected range (400-700ms) for 64KB at 1Mbps",
                     i,
                     relative_delay
@@ -365,7 +365,7 @@ mod tests {
 
         // Compressed content should be different
         assert_ne!(compressed, content);
-        assert!(compressed.len() > 0);
+        assert!(!compressed.is_empty());
     }
 
     #[test]
@@ -376,7 +376,7 @@ mod tests {
 
         // Gzip may increase size for very small content
         let compressed = compress_content(content, &ContentEncodingType::Gzip).unwrap();
-        assert!(compressed.len() > 0);
+        assert!(!compressed.is_empty());
 
         // But identity should preserve it
         let identity = compress_content(content, &ContentEncodingType::Identity).unwrap();

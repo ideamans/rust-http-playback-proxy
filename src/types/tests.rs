@@ -1,10 +1,10 @@
 #[cfg(test)]
-mod tests {
+mod types_tests {
     use crate::types::{
         BodyChunk, ContentEncodingType, DeviceType, Inventory, Resource, Transaction,
     };
     use serde::Serialize;
-    use serde_json;
+    
     use std::str::FromStr;
 
     #[test]

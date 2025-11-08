@@ -306,7 +306,7 @@ pub mod mocks {
 
         fn elapsed_since(&self, start: u64) -> u64 {
             let now = self.now_ms();
-            if now >= start { now - start } else { 0 }
+            now.saturating_sub(start)
         }
     }
 

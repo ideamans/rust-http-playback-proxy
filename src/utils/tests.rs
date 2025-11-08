@@ -1,17 +1,15 @@
 #[cfg(test)]
-mod tests {
+mod utils_tests {
     use crate::utils::{
         extract_charset_from_content_type, find_available_port, generate_file_path_from_url,
         get_port_or_default, is_text_resource,
     };
 
     #[test]
-    #[allow(unused_comparisons)]
     fn test_find_available_port() {
         let port = find_available_port(8080).unwrap();
         assert!(port >= 8080);
-        // u16の最大値は65535なので、この比較は常にtrueになるが意図的に残す
-        assert!(port <= 65535);
+        // Port is u16, so it's always within valid range
     }
 
     #[test]

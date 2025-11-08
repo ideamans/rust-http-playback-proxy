@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -198,7 +198,7 @@ async fn http_client_with_proxy(proxy_port: u16) -> reqwest::Client {
 }
 
 /// Start the HTTP playback proxy in recording mode
-async fn start_recording_proxy(port: u16, inventory_dir: &PathBuf) -> Result<Child> {
+async fn start_recording_proxy(port: u16, inventory_dir: &Path) -> Result<Child> {
     let binary_path = get_binary_path();
 
     println!(
@@ -209,7 +209,7 @@ async fn start_recording_proxy(port: u16, inventory_dir: &PathBuf) -> Result<Chi
     );
 
     let mut child = Command::new(&binary_path)
-        .args(&[
+        .args([
             "recording",
             "--port",
             &port.to_string(),
@@ -227,14 +227,14 @@ async fn start_recording_proxy(port: u16, inventory_dir: &PathBuf) -> Result<Chi
     sleep(Duration::from_millis(2000)).await;
 
     // Check if the port is actually listening
-    if let Err(_) = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)) {
+    if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_err() {
         panic!("Recording proxy is not listening on port {}", port);
     }
     println!("Recording proxy confirmed listening on port {}", port);
 
     // Also check if the process is actually running
     let output = Command::new("lsof")
-        .args(&["-i", &format!(":{}", port)])
+        .args(["-i", &format!(":{}", port)])
         .output()
         .expect("Failed to run lsof");
     println!(
@@ -263,12 +263,12 @@ async fn start_recording_proxy(port: u16, inventory_dir: &PathBuf) -> Result<Chi
     Ok(child)
 }
 
-/// Start the HTTP playback proxy in playback mode  
-async fn start_playback_proxy(port: u16, inventory_dir: &PathBuf) -> Result<Child> {
+/// Start the HTTP playback proxy in playback mode
+async fn start_playback_proxy(port: u16, inventory_dir: &Path) -> Result<Child> {
     let binary_path = get_binary_path();
 
     let child = Command::new(&binary_path)
-        .args(&[
+        .args([
             "playback",
             "--port",
             &port.to_string(),
@@ -298,7 +298,9 @@ fn get_binary_path() -> PathBuf {
     release_path.push("http-playback-proxy");
 
     // Prefer debug binary for testing (more logging)
-    let path = if debug_path.exists() {
+    
+
+    if debug_path.exists() {
         println!("Using debug binary: {}", debug_path.display());
         debug_path
     } else if release_path.exists() {
@@ -306,9 +308,7 @@ fn get_binary_path() -> PathBuf {
         release_path
     } else {
         panic!("No binary found. Please run 'cargo build' or 'cargo build --release' first.");
-    };
-
-    path
+    }
 }
 
 /// Build the binary if it doesn't exist
@@ -318,7 +318,7 @@ async fn ensure_binary_built() -> Result<()> {
     if !binary_path.exists() {
         println!("Building binary...");
         let output = Command::new("cargo")
-            .args(&["build", "--bin", "http-playback-proxy"])
+            .args(["build", "--bin", "http-playback-proxy"])
             .output()?;
 
         if !output.status.success() {
@@ -477,10 +477,8 @@ async fn test_recording_and_playback_integration() {
     // List all files in inventory directory
     if let Ok(entries) = std::fs::read_dir(&inventory_dir) {
         println!("Contents of inventory directory:");
-        for entry in entries {
-            if let Ok(entry) = entry {
-                println!("  - {:?}", entry.path());
-            }
+        for entry in entries.flatten() {
+            println!("  - {:?}", entry.path());
         }
     } else {
         println!("Could not read inventory directory");
