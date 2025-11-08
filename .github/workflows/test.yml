@@ -13,10 +13,9 @@ on:
 jobs:
   test:
     name: Run unit tests
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
         rust: [stable]
 
     steps:
