@@ -33,33 +33,33 @@ cargo tarpaulin --out Html --output-dir coverage
 
 ## Pre-Commit Checklist
 
-**IMPORTANT**: Before committing any changes, always run the following commands in order:
+**IMPORTANT**: Before committing any changes, always run the CI check script:
 
 ```bash
-# 1. Check and fix formatting (same as CI)
-cargo fmt --all -- --check
-# If formatting issues found, fix them:
-cargo fmt --all
-
-# 2. Run strict linter checks (same as CI with -D warnings)
-cargo clippy --all-targets --all-features -- -D warnings
-# If warnings found, fix them automatically where possible:
-cargo clippy --fix --all-targets --all-features --allow-dirty
-# Then re-run the check to ensure all warnings are resolved
-
-# 3. Run all tests (ensure all tests pass)
-cargo test
-
-# Only commit if all three steps complete successfully
+./check-ci.sh
 ```
 
-**Why these specific commands:**
-- `--all` ensures all workspace members are checked
-- `-- --check` verifies formatting without modifying files (same as CI)
-- `-D warnings` treats all warnings as errors (same strict level as CI)
-- `--all-targets --all-features` checks production code, tests, and examples
+This script runs the exact same checks as CI with identical environment variables:
+1. `cargo fmt --all -- --check` - Formatting check
+2. `cargo clippy --all-targets --all-features -- -D warnings` - Strict linter
+3. `cargo test` - All tests (unit + integration)
 
-This ensures code quality matches CI requirements and prevents broken commits from entering the repository.
+**Environment variables set by CI** (automatically set by the script):
+- `RUSTFLAGS="-D warnings"` - Treats ALL warnings as errors (not just clippy)
+- `CARGO_INCREMENTAL=0` - Disables incremental compilation
+- `CARGO_TERM_COLOR=always` - Forces color output
+- `RUST_BACKTRACE=short` - Short backtraces
+
+**Manual fixes:**
+```bash
+# Fix formatting issues
+cargo fmt --all
+
+# Fix clippy warnings automatically where possible
+cargo clippy --fix --all-targets --all-features --allow-dirty
+```
+
+This ensures code quality matches CI requirements exactly and prevents broken commits.
 
 ## CLI Interface
 

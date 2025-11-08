@@ -52,6 +52,7 @@ pub trait PortFinder: Send + Sync {
 /// Real implementations
 pub struct RealFileSystem;
 pub struct RealTimeProvider {
+    #[allow(dead_code)]
     start_time: std::time::Instant,
 }
 
