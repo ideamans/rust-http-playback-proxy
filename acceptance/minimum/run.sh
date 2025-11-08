@@ -13,7 +13,7 @@ echo ""
 
 # Build test binary
 echo "Step 2: Building test binary..."
-cd accept/minimum
+cd acceptance/minimum
 cargo build --release
 echo "Test binary built successfully"
 echo ""

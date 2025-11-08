@@ -26,7 +26,7 @@ echo ""
 
 # Step 2: Build the test binary
 echo -e "${YELLOW}Step 2: Building performance test binary...${NC}"
-cd accept/performance
+cd acceptance/performance
 # Remove existing test binary to ensure fresh build
 rm -f target/release/performance-test
 cargo build --release
