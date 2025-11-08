@@ -1,7 +1,7 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
-use clap::ValueEnum;
 
 /// HTTP header value that can be either a single string or multiple strings (for headers like Set-Cookie)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -131,7 +131,8 @@ pub struct BodyChunk {
 pub struct Transaction {
     pub method: String,
     pub url: String,
-    #[allow(dead_code)] // TODO: Will be used for timing validation once playback timing issues are fixed
+    #[allow(dead_code)]
+    // TODO: Will be used for timing validation once playback timing issues are fixed
     pub ttfb: u64,
     pub status_code: Option<u16>,
     pub error_message: Option<String>,

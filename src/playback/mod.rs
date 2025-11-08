@@ -1,13 +1,13 @@
-use anyhow::Result;
-use std::path::PathBuf;
-use std::sync::Arc;
-use crate::utils::get_port_or_default;
-use crate::types::Inventory;
 use crate::traits::{FileSystem, RealFileSystem};
+use crate::types::Inventory;
+use crate::utils::get_port_or_default;
+use anyhow::Result;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 mod proxy;
-mod transaction;
 mod tests;
+mod transaction;
 
 #[cfg(test)]
 mod transaction_tests;
@@ -24,19 +24,24 @@ pub async fn run_playback_mode(port: Option<u16>, inventory_dir: PathBuf) -> Res
     // Load inventory
     let file_system = Arc::new(RealFileSystem);
     let inventory = load_inventory(&inventory_dir, file_system.clone()).await?;
-    
-    println!("Loaded {} resources from inventory", inventory.resources.len());
-    
+
+    println!(
+        "Loaded {} resources from inventory",
+        inventory.resources.len()
+    );
+
     // Convert resources to transactions
-    let transactions = transaction::convert_resources_to_transactions(&inventory, &inventory_dir, file_system).await?;
-    
+    let transactions =
+        transaction::convert_resources_to_transactions(&inventory, &inventory_dir, file_system)
+            .await?;
+
     println!("Created {} transactions", transactions.len());
 
     proxy::start_playback_proxy(port, transactions).await
 }
 
 pub async fn load_inventory<F: FileSystem>(
-    inventory_dir: &PathBuf,
+    inventory_dir: &Path,
     file_system: Arc<F>,
 ) -> Result<Inventory> {
     let inventory_path = inventory_dir.join("inventory.json");

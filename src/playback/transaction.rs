@@ -1,32 +1,34 @@
-use anyhow::Result;
-use std::path::PathBuf;
-use std::sync::Arc;
-use crate::types::{Inventory, Resource, Transaction, BodyChunk};
 use crate::traits::FileSystem;
+use crate::types::{BodyChunk, Inventory, Resource, Transaction};
+use anyhow::Result;
 use encoding_rs::{Encoding, UTF_8};
+use std::path::Path;
+use std::sync::Arc;
 
 const CHUNK_SIZE: usize = 1024 * 64; // 64KB chunks
 const TARGET_MBPS: f64 = 1.0; // Default target speed in Mbps
 
 pub async fn convert_resources_to_transactions<F: FileSystem>(
     inventory: &Inventory,
-    inventory_dir: &PathBuf,
+    inventory_dir: &Path,
     file_system: Arc<F>,
 ) -> Result<Vec<Transaction>> {
     let mut transactions = Vec::new();
-    
+
     for resource in &inventory.resources {
-        if let Some(transaction) = convert_resource_to_transaction(resource, inventory_dir, file_system.clone()).await? {
+        if let Some(transaction) =
+            convert_resource_to_transaction(resource, inventory_dir, file_system.clone()).await?
+        {
             transactions.push(transaction);
         }
     }
-    
+
     Ok(transactions)
 }
 
 pub async fn convert_resource_to_transaction<F: FileSystem>(
     resource: &Resource,
-    inventory_dir: &PathBuf,
+    inventory_dir: &Path,
     file_system: Arc<F>,
 ) -> Result<Option<Transaction>> {
     // Load content
@@ -79,12 +81,14 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
     // Update content-length
     headers.insert(
         "content-length".to_string(),
-        crate::types::HeaderValue::Single(final_content.len().to_string())
+        crate::types::HeaderValue::Single(final_content.len().to_string()),
     );
 
     // Update charset - use original_charset if available, otherwise fall back to content_type_charset
     if let Some(mime_type) = &resource.content_type_mime {
-        let charset_to_use = resource.original_charset.as_ref()
+        let charset_to_use = resource
+            .original_charset
+            .as_ref()
             .or(resource.content_type_charset.as_ref());
 
         let content_type_value = if let Some(charset) = charset_to_use {
@@ -95,7 +99,7 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
 
         headers.insert(
             "content-type".to_string(),
-            crate::types::HeaderValue::Single(content_type_value)
+            crate::types::HeaderValue::Single(content_type_value),
         );
     }
 
@@ -149,7 +153,8 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
 
         // Calculate time for next chunk based on proportional distribution
         // Each chunk gets its share of the total transfer time based on its size
-        let chunk_duration_ms = ((chunk_size as f64 / total_size as f64) * transfer_duration_ms as f64) as u64;
+        let chunk_duration_ms =
+            ((chunk_size as f64 / total_size as f64) * transfer_duration_ms as f64) as u64;
         current_time += chunk_duration_ms;
         offset += chunk_size;
     }
@@ -162,14 +167,14 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
 
 pub fn minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<u8>> {
     let content_str = String::from_utf8_lossy(content);
-    
+
     let minified = match mime_type.as_deref() {
         Some("text/html") => {
             // Simple HTML minification - remove extra whitespace
             let mut result = String::new();
             let mut in_tag = false;
             let mut prev_was_space = false;
-            
+
             for ch in content_str.chars() {
                 match ch {
                     '<' => {
@@ -216,9 +221,9 @@ pub fn minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<
                 .collect::<Vec<_>>()
                 .join("")
         }
-        _ => content_str.to_string()
+        _ => content_str.to_string(),
     };
-    
+
     Ok(minified.into_bytes())
 }
 
@@ -227,8 +232,8 @@ use crate::types::ContentEncodingType;
 pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Result<Vec<u8>> {
     match encoding {
         ContentEncodingType::Gzip => {
-            use flate2::write::GzEncoder;
             use flate2::Compression;
+            use flate2::write::GzEncoder;
             use std::io::Write;
 
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -236,8 +241,8 @@ pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Resul
             Ok(encoder.finish()?)
         }
         ContentEncodingType::Deflate => {
-            use flate2::write::DeflateEncoder;
             use flate2::Compression;
+            use flate2::write::DeflateEncoder;
             use std::io::Write;
 
             let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
@@ -274,4 +279,3 @@ pub fn re_encode_to_charset(content: &[u8], charset_name: &str) -> Result<Vec<u8
     let (encoded, _encoding_used, _had_errors) = encoding.encode(utf8_str);
     Ok(encoded.into_owned())
 }
-

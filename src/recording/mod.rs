@@ -1,12 +1,12 @@
-use anyhow::Result;
-use std::path::PathBuf;
 use crate::types::{DeviceType, Inventory};
 use crate::utils::get_port_or_default;
+use anyhow::Result;
+use std::path::PathBuf;
 
-pub mod proxy;
-mod processor;
-mod tests;
 mod hudsucker_handler;
+mod processor;
+pub mod proxy;
+mod tests;
 
 #[cfg(test)]
 mod processor_tests;

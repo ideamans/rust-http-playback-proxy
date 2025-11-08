@@ -50,13 +50,11 @@ pub trait PortFinder: Send + Sync {
 }
 
 /// Real implementations
-pub struct RealHttpClient;
 pub struct RealFileSystem;
 pub struct RealTimeProvider {
+    #[allow(dead_code)]
     start_time: std::time::Instant,
 }
-
-pub struct RealPortFinder;
 
 impl RealTimeProvider {
     pub fn new() -> Self {
@@ -69,26 +67,6 @@ impl RealTimeProvider {
 impl Default for RealTimeProvider {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[async_trait]
-impl HttpClient for RealHttpClient {
-    async fn request(
-        &self,
-        _method: &str,
-        _url: &str,
-        _headers: Option<&std::collections::HashMap<String, String>>,
-        _body: Option<&[u8]>,
-    ) -> Result<HttpResponse> {
-        // TODO: Implement real HTTP client using reqwest or hyper
-        // For now, return a mock response
-        Ok(HttpResponse {
-            status_code: 200,
-            headers: std::collections::HashMap::new(),
-            body: b"Mock response".to_vec(),
-            elapsed_ms: 100,
-        })
     }
 }
 
@@ -131,21 +109,15 @@ impl TimeProvider for RealTimeProvider {
 
     fn elapsed_since(&self, start: u64) -> u64 {
         let now = self.now_ms();
-        if now >= start { now - start } else { 0 }
-    }
-}
-
-impl PortFinder for RealPortFinder {
-    fn find_available_port(&self, start_port: u16) -> Result<u16> {
-        crate::utils::find_available_port(start_port)
+        now.saturating_sub(start)
     }
 }
 
 #[cfg(test)]
 pub mod mocks {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     /// Mock HTTP client for testing
     pub struct MockHttpClient {
@@ -163,7 +135,10 @@ pub mod mocks {
         }
 
         pub fn set_response(&self, key: &str, response: HttpResponse) {
-            self.responses.lock().unwrap().insert(key.to_string(), response);
+            self.responses
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), response);
         }
 
         pub fn get_requests(&self) -> Vec<(String, String)> {
@@ -180,8 +155,11 @@ pub mod mocks {
             _headers: Option<&std::collections::HashMap<String, String>>,
             _body: Option<&[u8]>,
         ) -> Result<HttpResponse> {
-            self.requests.lock().unwrap().push((method.to_string(), url.to_string()));
-            
+            self.requests
+                .lock()
+                .unwrap()
+                .push((method.to_string(), url.to_string()));
+
             let key = format!("{}:{}", method, url);
             if let Some(response) = self.responses.lock().unwrap().get(&key) {
                 Ok(response.clone())
@@ -243,7 +221,10 @@ pub mod mocks {
 
         async fn write(&self, path: &Path, content: &[u8]) -> Result<()> {
             let path_str = path.to_string_lossy().to_string();
-            self.files.lock().unwrap().insert(path_str, content.to_vec());
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path_str, content.to_vec());
             Ok(())
         }
 
@@ -297,27 +278,7 @@ pub mod mocks {
 
         fn elapsed_since(&self, start: u64) -> u64 {
             let now = self.now_ms();
-            if now >= start { now - start } else { 0 }
-        }
-    }
-
-    /// Mock port finder for testing
-    pub struct MockPortFinder {
-        available_port: u16,
-    }
-
-    #[allow(dead_code)]
-    impl MockPortFinder {
-        pub fn new(port: u16) -> Self {
-            Self {
-                available_port: port,
-            }
-        }
-    }
-
-    impl PortFinder for MockPortFinder {
-        fn find_available_port(&self, _start_port: u16) -> Result<u16> {
-            Ok(self.available_port)
+            now.saturating_sub(start)
         }
     }
 }

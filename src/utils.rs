@@ -1,8 +1,7 @@
 use anyhow::Result;
+use sha1::{Digest, Sha1};
 use std::net::TcpListener;
 use url::Url;
-use sha1::{Digest, Sha1};
-use hex;
 
 pub fn find_available_port(start_port: u16) -> Result<u16> {
     for port in start_port..=65535 {
@@ -27,9 +26,9 @@ pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
     let scheme = parsed_url.scheme();
     let host = parsed_url.host_str().unwrap_or("localhost");
     let path = parsed_url.path();
-    
+
     let mut file_path = format!("{}/{}/{}", method.to_lowercase(), scheme, host);
-    
+
     // Handle path
     let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     if path_segments.is_empty() {
@@ -39,23 +38,26 @@ pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
             file_path.push('/');
             file_path.push_str(segment);
         }
-        
+
         // If path ends with '/', add index.html
         if path.ends_with('/') {
             file_path.push_str("/index.html");
         }
-        
+
         // Add query parameters to filename
+        #[allow(clippy::collapsible_if)]
         if let Some(query) = parsed_url.query() {
             if !query.is_empty() {
                 if query.len() <= 32 {
                     // Simple case: add query as is
                     let encoded_query = urlencoding::encode(query);
-                    if let Some(last_segment) = file_path.split('/').last() {
+                    if let Some(last_segment) = file_path.split('/').next_back() {
                         if let Some(dot_pos) = last_segment.rfind('.') {
                             let (name, ext) = last_segment.split_at(dot_pos);
-                            let new_file_path = file_path[..file_path.len() - last_segment.len()].to_string();
-                            file_path = format!("{}{}~{}{}", new_file_path, name, encoded_query, ext);
+                            let new_file_path =
+                                file_path[..file_path.len() - last_segment.len()].to_string();
+                            file_path =
+                                format!("{}{}~{}{}", new_file_path, name, encoded_query, ext);
                         } else {
                             file_path.push_str(&format!("~{}", encoded_query));
                         }
@@ -67,13 +69,17 @@ pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
                     let mut hasher = Sha1::new();
                     hasher.update(remaining.as_bytes());
                     let hash = hex::encode(hasher.finalize());
-                    
+
                     let encoded_first_32 = urlencoding::encode(first_32);
-                    if let Some(last_segment) = file_path.split('/').last() {
+                    if let Some(last_segment) = file_path.split('/').next_back() {
                         if let Some(dot_pos) = last_segment.rfind('.') {
                             let (name, ext) = last_segment.split_at(dot_pos);
-                            let new_file_path = file_path[..file_path.len() - last_segment.len()].to_string();
-                            file_path = format!("{}{}~{}.~{}{}", new_file_path, name, encoded_first_32, hash, ext);
+                            let new_file_path =
+                                file_path[..file_path.len() - last_segment.len()].to_string();
+                            file_path = format!(
+                                "{}{}~{}.~{}{}",
+                                new_file_path, name, encoded_first_32, hash, ext
+                            );
                         } else {
                             file_path.push_str(&format!("~{}.~{}", encoded_first_32, hash));
                         }
@@ -82,17 +88,17 @@ pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
             }
         }
     }
-    
+
     Ok(file_path)
 }
 
 #[allow(dead_code)]
 pub fn is_text_resource(content_type: &str) -> bool {
     let content_type = content_type.to_lowercase();
-    content_type.starts_with("text/html") ||
-    content_type.starts_with("text/css") ||
-    content_type.starts_with("application/javascript") ||
-    content_type.starts_with("text/javascript")
+    content_type.starts_with("text/html")
+        || content_type.starts_with("text/css")
+        || content_type.starts_with("application/javascript")
+        || content_type.starts_with("text/javascript")
 }
 
 #[allow(dead_code)]
