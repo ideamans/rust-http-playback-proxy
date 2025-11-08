@@ -8,14 +8,14 @@ test:
 # Build both binaries
 build:
 	@echo "Building main http-playback-proxy binary..."
-	@cd ../.. && cargo build --release
+	@cd .. && cargo build --release
 	@echo "Building performance test binary..."
 	@cargo build --release
 
 # Clean build artifacts
 clean:
 	@cargo clean
-	@cd ../.. && cargo clean
+	@cd .. && cargo clean
 
 # Quick test (assumes binaries are already built)
 quick-test:

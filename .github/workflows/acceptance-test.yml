@@ -1,9 +1,6 @@
 name: Acceptance Tests
 
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
@@ -124,78 +121,9 @@ jobs:
           # Force use of local binaries (don't download from GitHub)
           HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/typescript
 
-  test-performance:
-    name: Performance Acceptance Test - ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Run performance acceptance test
-        working-directory: acceptance/performance
-        run: make test
-        timeout-minutes: 5
-
-  test-minimum:
-    name: Minimum Timing Acceptance Test - ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Run minimum timing acceptance test
-        working-directory: acceptance/minimum
-        run: ./run.sh
-        timeout-minutes: 5
-
-  test-content:
-    name: Content Acceptance Test - ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-
-    runs-on: ${{ matrix.os }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Run content acceptance test
-        working-directory: acceptance/content
-        run: make test
-        timeout-minutes: 5
-
   summary:
     name: Test Summary
-    needs: [test-golang, test-typescript, test-performance, test-minimum, test-content]
+    needs: [test-golang, test-typescript]
     runs-on: ubuntu-latest
     if: always()
 
@@ -203,16 +131,10 @@ jobs:
       - name: Check test results
         run: |
           if [ "${{ needs.test-golang.result }}" != "success" ] || \
-             [ "${{ needs.test-typescript.result }}" != "success" ] || \
-             [ "${{ needs.test-performance.result }}" != "success" ] || \
-             [ "${{ needs.test-minimum.result }}" != "success" ] || \
-             [ "${{ needs.test-content.result }}" != "success" ]; then
+             [ "${{ needs.test-typescript.result }}" != "success" ]; then
             echo "❌ Some acceptance tests failed"
             echo "Go tests: ${{ needs.test-golang.result }}"
             echo "TypeScript tests: ${{ needs.test-typescript.result }}"
-            echo "Performance tests: ${{ needs.test-performance.result }}"
-            echo "Minimum timing tests: ${{ needs.test-minimum.result }}"
-            echo "Content tests: ${{ needs.test-content.result }}"
             exit 1
           fi
 

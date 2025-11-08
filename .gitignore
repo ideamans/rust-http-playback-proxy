@@ -1,3 +1,4 @@
+# Rust build artifacts
 /target
 
 # TypeScript build artifacts and dependencies
@@ -5,15 +6,26 @@
 /typescript/node_modules/
 /typescript/package-lock.json
 
-# Acceptance test artifacts
+# E2E test artifacts
+/e2e/performance/target/
+/e2e/performance/Cargo.lock
+/e2e/minimum/target/
+/e2e/minimum/Cargo.lock
+/e2e/content/target/
+/e2e/content/Cargo.lock
+
+# Acceptance test artifacts (language wrappers)
 /acceptance/golang/inventory/
 /acceptance/typescript/inventory/
 /acceptance/typescript/node_modules/
 /acceptance/typescript/package-lock.json
 /acceptance/golang/go.sum
-/acceptance/performance/target/
-/acceptance/performance/Cargo.lock
-/acceptance/minimum/target/
-/acceptance/minimum/Cargo.lock
-/acceptance/content/target/
-/acceptance/content/Cargo.lock
+
+# Editor and OS-specific files
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.iml

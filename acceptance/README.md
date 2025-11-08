@@ -1,31 +1,23 @@
 # Acceptance Tests
 
-This directory contains acceptance tests for the http-playback-proxy language wrappers.
+This directory contains acceptance tests for the http-playback-proxy language wrappers (Go and TypeScript/Node.js).
 
 ## Purpose
 
-These tests ensure that the http-playback-proxy works correctly in production-like environments. They verify:
+These tests ensure that the http-playback-proxy language wrappers work correctly in production-like environments. They verify:
 
 1. **Binary Distribution**: Binaries are correctly bundled and located (Go/TypeScript wrappers)
-2. **Recording**: HTTP traffic can be recorded through the proxy
-3. **Inventory**: Recorded data is saved and can be loaded correctly
-4. **Playback**: Recorded traffic can be played back with accurate timing
-5. **Performance**: Timing accuracy meets minimum requirements (performance/minimum tests)
-6. **Content Processing**: Minified HTML/CSS/JS are beautified for editability (content test)
+2. **Wrapper API**: Language-specific APIs work correctly
+3. **Recording**: HTTP traffic can be recorded through the proxy
+4. **Inventory**: Recorded data is saved and can be loaded correctly
+5. **Playback**: Recorded traffic can be played back with accurate timing
+
+**Note**: Core E2E tests (performance, minimum timing, content beautification) have been moved to [../e2e/](../e2e/).
 
 ## Structure
 
 ```
 acceptance/
-├── performance/     # Performance acceptance tests (Rust)
-│   ├── src/         # Test implementation
-│   └── Makefile     # Build and test targets
-├── minimum/         # Minimum timing acceptance tests (Rust)
-│   ├── src/         # Test implementation with various timing scenarios
-│   └── run.sh       # Test runner script
-├── content/         # Content beautification tests (Rust)
-│   ├── src/         # Test minified HTML/CSS/JS beautification
-│   └── run.sh       # Test runner script
 ├── golang/          # Go acceptance tests
 │   ├── go.mod       # Go module with local dependency
 │   ├── main_test.go # Test implementation
@@ -47,24 +39,6 @@ make test-all
 ```
 
 ### Individual Tests
-
-**Performance Test:**
-```bash
-cd acceptance
-make test-performance
-```
-
-**Minimum Timing Test:**
-```bash
-cd acceptance
-make test-minimum
-```
-
-**Content Beautification Test:**
-```bash
-cd acceptance
-make test-content
-```
 
 **Go Wrapper Test:**
 ```bash
@@ -123,12 +97,9 @@ The workflow runs tests on multiple platforms:
 - **Realistic**: Uses actual Go modules / npm packages
 - **Comprehensive**: Tests full workflow from recording to playback
 - **Cross-platform**: Runs on all supported platforms
-- **Content Quality**: Verifies minified resources are beautified for editability
-- **Timing Accuracy**: Ensures playback timing matches recording within tolerance
-
 ## Environment Variables
 
-Both tests support the following environment variables:
+Tests support the following environment variables:
 
 - `HTTP_PLAYBACK_PROXY_CACHE_DIR`: Override binary cache directory
   - Useful for testing with specific binary locations
@@ -177,48 +148,35 @@ This ensures that binaries are tested before being released to users.
 
 ## Adding New Tests
 
-When adding new tests:
+When adding new wrapper tests:
 
-1. **Rust tests**: Create a new directory under `acceptance/` with `src/main.rs`, `Cargo.toml`, and `run.sh`
-2. **Language wrapper tests**: Add test cases to `main_test.go` (Go) or `test.js` (TypeScript)
-3. Update `acceptance/Makefile` with new test target
-4. Update this README.md with test description
-5. Ensure tests are idempotent and use temporary directories
-6. Test locally before committing (`make test-all`)
-7. Verify tests pass in CI
+1. Add test cases to `main_test.go` (Go) or `test.js` (TypeScript)
+2. Update this README.md with test description
+3. Ensure tests are idempotent and use temporary directories
+4. Test locally before committing (`make test-all`)
+5. Verify tests pass in CI
+
+For core E2E tests (performance, timing, content), see [../e2e/](../e2e/).
 
 ## Test Descriptions
 
-### Performance Test (`performance/`)
-- **Purpose**: End-to-end performance and stress testing
-- **Verifies**: Recording, playback, content processing at scale
-- **Runtime**: ~30-60 seconds
-
-### Minimum Timing Test (`minimum/`)
-- **Purpose**: Verify timing accuracy across different file sizes and latencies
-- **Scenarios**:
-  - 500KB files: fast (100ms TTFB, 200ms transfer), medium (500ms/1000ms), slow (1000ms/2000ms)
-  - 1KB files: fast (100ms/100ms), medium (500ms/200ms), slow (1000ms/400ms)
-- **Tolerance**: 10% deviation allowed
-- **Verifies**: TTFB and transfer duration match expected values during recording and playback
-- **Runtime**: ~60-90 seconds (6 scenarios × ~15 seconds each)
-
-### Content Beautification Test (`content/`)
-- **Purpose**: Verify minified HTML/CSS/JS are beautified during recording
+### Go Wrapper Test (`golang/`)
+- **Purpose**: Verify Go wrapper API and binary distribution
 - **Verifies**:
-  - Minified HTML is beautified (line count increases 2x+)
-  - Minified CSS is beautified (line count increases 2x+)
-  - Minified JavaScript is beautified (line count increases 2x+)
-  - `inventory.json` has `minify: true` flag for these resources
-- **Why**: Makes recorded content editable for PageSpeed optimization testing
-- **Runtime**: ~10 seconds
+  - Binary can be located and executed from Go package
+  - Go API works correctly (StartRecording, StartPlayback, Stop)
+  - End-to-end workflow from Go perspective
 
-### Language Wrapper Tests (`golang/`, `typescript/`)
-- **Purpose**: Verify binary distribution and wrapper API functionality
-- **Verifies**: End-to-end workflow from language-specific package perspective
+### TypeScript Wrapper Test (`typescript/`)
+- **Purpose**: Verify TypeScript/Node.js wrapper API and binary distribution
+- **Verifies**:
+  - Binary can be located and executed from npm package
+  - TypeScript API works correctly
+  - End-to-end workflow from Node.js perspective
 
 ## See Also
 
+- [E2E Tests README](../e2e/README.md) - Core E2E tests
 - [Go Acceptance Test README](golang/README.md)
 - [TypeScript Acceptance Test README](typescript/README.md)
 - [GitHub Actions Workflow](../.github/workflows/acceptance-test.yml)
