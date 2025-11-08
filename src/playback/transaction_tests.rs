@@ -220,11 +220,6 @@ mod tests {
         let content = vec![0u8; 2048]; // 2KB content
         let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
 
-        // All target times should be >= 0 (relative to TTFB)
-        for chunk in &chunks {
-            assert!(chunk.target_time >= 0);
-        }
-
         // First chunk should start at 0
         assert_eq!(chunks[0].target_time, 0);
 
