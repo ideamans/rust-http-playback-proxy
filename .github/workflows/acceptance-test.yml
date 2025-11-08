@@ -3,11 +3,9 @@ name: Acceptance Tests
 on:
   push:
     branches:
-      - develop
       - main
   pull_request:
     branches:
-      - develop
       - main
   workflow_dispatch:
 
@@ -126,19 +124,70 @@ jobs:
           # Force use of local binaries (don't download from GitHub)
           HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/typescript
 
+  test-performance:
+    name: Performance Acceptance Test - ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run performance acceptance test
+        working-directory: acceptance/performance
+        run: make test
+        timeout-minutes: 5
+
+  test-minimum:
+    name: Minimum Timing Acceptance Test - ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run minimum timing acceptance test
+        working-directory: acceptance/minimum
+        run: ./run.sh
+        timeout-minutes: 5
+
   summary:
     name: Test Summary
-    needs: [test-golang, test-typescript]
+    needs: [test-golang, test-typescript, test-performance, test-minimum]
     runs-on: ubuntu-latest
     if: always()
 
     steps:
       - name: Check test results
         run: |
-          if [ "${{ needs.test-golang.result }}" != "success" ] || [ "${{ needs.test-typescript.result }}" != "success" ]; then
+          if [ "${{ needs.test-golang.result }}" != "success" ] || \
+             [ "${{ needs.test-typescript.result }}" != "success" ] || \
+             [ "${{ needs.test-performance.result }}" != "success" ] || \
+             [ "${{ needs.test-minimum.result }}" != "success" ]; then
             echo "❌ Some acceptance tests failed"
             echo "Go tests: ${{ needs.test-golang.result }}"
             echo "TypeScript tests: ${{ needs.test-typescript.result }}"
+            echo "Performance tests: ${{ needs.test-performance.result }}"
+            echo "Minimum timing tests: ${{ needs.test-minimum.result }}"
             exit 1
           fi
 
