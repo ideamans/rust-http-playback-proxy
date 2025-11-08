@@ -1,4 +1,4 @@
-.PHONY: help build test-all test-performance test-minimum test-typescript test-golang clean
+.PHONY: help build test-all test-performance test-minimum test-content test-contents test-typescript test-golang clean
 
 # Default target
 help:
@@ -9,6 +9,7 @@ help:
 	@echo "  make test-all         - Run all acceptance tests (with build)"
 	@echo "  make test-performance - Run performance acceptance test"
 	@echo "  make test-minimum     - Run minimum timing acceptance test"
+	@echo "  make test-content(s)  - Run content beautification acceptance test"
 	@echo "  make test-typescript  - Run TypeScript acceptance test (with build)"
 	@echo "  make test-golang      - Run Golang acceptance test (with build)"
 	@echo "  make clean            - Clean all build artifacts"
@@ -51,7 +52,7 @@ build:
 	@echo ""
 
 # Run all acceptance tests
-test-all: build test-performance test-minimum test-typescript test-golang
+test-all: build test-performance test-minimum test-content test-typescript test-golang
 	@echo ""
 	@echo "=========================================="
 	@echo "  ALL ACCEPTANCE TESTS PASSED!"
@@ -72,6 +73,16 @@ test-minimum:
 	@echo ""
 	@cd minimum && ./run.sh
 
+# Content beautification acceptance test
+test-content:
+	@echo ""
+	@echo "=== Running Content Beautification Acceptance Test ==="
+	@echo ""
+	@cd content && ./run.sh
+
+# Alias for test-content (plural form)
+test-contents: test-content
+
 # TypeScript acceptance test (requires latest binary)
 test-typescript: build
 	@echo ""
@@ -91,6 +102,7 @@ clean:
 	@echo "Cleaning acceptance test artifacts..."
 	@cd performance && $(MAKE) clean 2>/dev/null || true
 	@cd minimum && cargo clean 2>/dev/null || true
+	@cd content && cargo clean 2>/dev/null || true
 	@cd typescript && rm -rf node_modules package-lock.json 2>/dev/null || true
 	@cd golang && go clean 2>/dev/null || true
 	@echo "Clean complete"

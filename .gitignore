@@ -15,3 +15,5 @@
 /acceptance/performance/Cargo.lock
 /acceptance/minimum/target/
 /acceptance/minimum/Cargo.lock
+/acceptance/content/target/
+/acceptance/content/Cargo.lock
