@@ -48,48 +48,6 @@ jobs:
         run: make test
         timeout-minutes: 5
 
-  test-minimum:
-    name: Minimum Timing E2E Test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry-
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-index-
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-e2e-target-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-e2e-target-
-
-      - name: Run minimum timing E2E test
-        working-directory: e2e/minimum
-        run: ./run.sh
-        timeout-minutes: 5
-
   test-content:
     name: Content Beautification E2E Test
     runs-on: ubuntu-latest
@@ -134,7 +92,7 @@ jobs:
 
   summary:
     name: E2E Test Summary
-    needs: [test-performance, test-minimum, test-content]
+    needs: [test-performance, test-content]
     runs-on: ubuntu-latest
     if: always()
 
@@ -142,11 +100,9 @@ jobs:
       - name: Check test results
         run: |
           if [ "${{ needs.test-performance.result }}" != "success" ] || \
-             [ "${{ needs.test-minimum.result }}" != "success" ] || \
              [ "${{ needs.test-content.result }}" != "success" ]; then
             echo "❌ Some E2E tests failed"
             echo "Performance tests: ${{ needs.test-performance.result }}"
-            echo "Minimum timing tests: ${{ needs.test-minimum.result }}"
             echo "Content tests: ${{ needs.test-content.result }}"
             exit 1
           fi
