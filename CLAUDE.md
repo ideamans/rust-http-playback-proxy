@@ -36,19 +36,30 @@ cargo tarpaulin --out Html --output-dir coverage
 **IMPORTANT**: Before committing any changes, always run the following commands in order:
 
 ```bash
-# 1. Format code
-cargo fmt
+# 1. Check and fix formatting (same as CI)
+cargo fmt --all -- --check
+# If formatting issues found, fix them:
+cargo fmt --all
 
-# 2. Run linter (fix any warnings)
-cargo clippy
+# 2. Run strict linter checks (same as CI with -D warnings)
+cargo clippy --all-targets --all-features -- -D warnings
+# If warnings found, fix them automatically where possible:
+cargo clippy --fix --all-targets --all-features --allow-dirty
+# Then re-run the check to ensure all warnings are resolved
 
-# 3. Run unit tests (ensure all tests pass)
+# 3. Run all tests (ensure all tests pass)
 cargo test
 
 # Only commit if all three steps complete successfully
 ```
 
-This ensures code quality and prevents broken commits from entering the repository.
+**Why these specific commands:**
+- `--all` ensures all workspace members are checked
+- `-- --check` verifies formatting without modifying files (same as CI)
+- `-D warnings` treats all warnings as errors (same strict level as CI)
+- `--all-targets --all-features` checks production code, tests, and examples
+
+This ensures code quality matches CI requirements and prevents broken commits from entering the repository.
 
 ## CLI Interface
 
