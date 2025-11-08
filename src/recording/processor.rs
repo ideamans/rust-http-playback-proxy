@@ -1,12 +1,14 @@
+use crate::traits::{FileSystem, TimeProvider};
+use crate::types::{ContentEncodingType, Resource};
+use crate::utils::{
+    extract_charset_from_content_type, generate_file_path_from_url, is_text_resource,
+};
 use anyhow::Result;
-use std::path::PathBuf;
+use encoding_rs::{Encoding, UTF_8};
 use flate2::read::GzDecoder;
 use std::io::Read;
-use encoding_rs::{Encoding, UTF_8};
+use std::path::PathBuf;
 use std::sync::Arc;
-use crate::types::{Resource, ContentEncodingType};
-use crate::utils::{is_text_resource, extract_charset_from_content_type, generate_file_path_from_url};
-use crate::traits::{FileSystem, TimeProvider};
 
 #[allow(dead_code)]
 pub struct RequestProcessor<F: FileSystem, T: TimeProvider> {
@@ -35,22 +37,32 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         content_type: Option<&str>,
     ) -> Result<()> {
         let decompressed_body = self.decompress_body(body, &resource.content_encoding)?;
-        
+
         if let Some(ct) = content_type {
-            resource.content_type_mime = Some(ct.split(';').next().unwrap_or(ct).trim().to_string());
+            resource.content_type_mime =
+                Some(ct.split(';').next().unwrap_or(ct).trim().to_string());
             resource.content_type_charset = extract_charset_from_content_type(ct);
 
             if is_text_resource(ct) {
                 // Try to process as text, fallback to binary if it fails
-                if let Err(e) = self.process_text_resource(resource, &decompressed_body).await {
-                    tracing::warn!("Failed to process as text resource, falling back to binary: {}", e);
-                    self.process_binary_resource(resource, &decompressed_body).await?;
+                if let Err(e) = self
+                    .process_text_resource(resource, &decompressed_body)
+                    .await
+                {
+                    tracing::warn!(
+                        "Failed to process as text resource, falling back to binary: {}",
+                        e
+                    );
+                    self.process_binary_resource(resource, &decompressed_body)
+                        .await?;
                 }
             } else {
-                self.process_binary_resource(resource, &decompressed_body).await?;
+                self.process_binary_resource(resource, &decompressed_body)
+                    .await?;
             }
         } else {
-            self.process_binary_resource(resource, &decompressed_body).await?;
+            self.process_binary_resource(resource, &decompressed_body)
+                .await?;
         }
 
         // Calculate mbps (megabits per second) from compressed body size
@@ -102,16 +114,13 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
     }
 
     #[allow(dead_code)]
-    pub async fn process_text_resource(
-        &self,
-        resource: &mut Resource,
-        body: &[u8],
-    ) -> Result<()> {
+    pub async fn process_text_resource(&self, resource: &mut Resource, body: &[u8]) -> Result<()> {
         // Save original charset before conversion
         resource.original_charset = resource.content_type_charset.clone();
 
         // Convert to UTF-8
-        let (utf8_content, _detected_encoding) = self.convert_to_utf8(body, &resource.content_type_charset);
+        let (utf8_content, _detected_encoding) =
+            self.convert_to_utf8(body, &resource.content_type_charset);
 
         // Update charset to UTF-8 (for internal storage only)
         resource.content_type_charset = Some("UTF-8".to_string());
@@ -139,7 +148,9 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
             self.file_system.create_dir_all(parent).await?;
         }
 
-        self.file_system.write(&full_path, content_to_save.as_bytes()).await?;
+        self.file_system
+            .write(&full_path, content_to_save.as_bytes())
+            .await?;
         // Store path relative to inventory dir (with "contents/" prefix)
         resource.content_file_path = Some(format!("contents/{}", file_path));
 
@@ -155,7 +166,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         // Save binary content as base64
         use base64::{Engine as _, engine::general_purpose};
         resource.content_base64 = Some(general_purpose::STANDARD.encode(body));
-        
+
         // Also save to file
         let file_path = generate_file_path_from_url(&resource.url, &resource.method)?;
         let full_path = self.contents_dir.join(&file_path);
@@ -167,7 +178,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         self.file_system.write(&full_path, body).await?;
         // Store path relative to inventory dir (with "contents/" prefix)
         resource.content_file_path = Some(format!("contents/{}", file_path));
-        
+
         Ok(())
     }
 
@@ -182,7 +193,6 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         let (cow, encoding_used, _had_errors) = encoding.decode(body);
         (cow.into_owned(), encoding_used.name())
     }
-
 
     #[allow(dead_code)]
     pub fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
@@ -204,8 +214,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
                     .replace(';', ";\n");
                 Ok(result)
             }
-            _ => Ok(content.to_string())
+            _ => Ok(content.to_string()),
         }
     }
 }
-

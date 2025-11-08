@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::types::{ContentEncodingType, DeviceType, Resource, Inventory, BodyChunk, Transaction};
+    use crate::types::{
+        BodyChunk, ContentEncodingType, DeviceType, Inventory, Resource, Transaction,
+    };
+    use serde::Serialize;
     use serde_json;
-use serde::Serialize;
     use std::str::FromStr;
 
     #[test]
@@ -27,10 +29,19 @@ use serde::Serialize;
 
     #[test]
     fn test_content_encoding_from_str() {
-        assert_eq!(ContentEncodingType::from_str("gzip").unwrap(), ContentEncodingType::Gzip);
-        assert_eq!(ContentEncodingType::from_str("br").unwrap(), ContentEncodingType::Br);
-        assert_eq!(ContentEncodingType::from_str("identity").unwrap(), ContentEncodingType::Identity);
-        
+        assert_eq!(
+            ContentEncodingType::from_str("gzip").unwrap(),
+            ContentEncodingType::Gzip
+        );
+        assert_eq!(
+            ContentEncodingType::from_str("br").unwrap(),
+            ContentEncodingType::Br
+        );
+        assert_eq!(
+            ContentEncodingType::from_str("identity").unwrap(),
+            ContentEncodingType::Identity
+        );
+
         assert!(ContentEncodingType::from_str("invalid").is_err());
     }
 
@@ -48,7 +59,7 @@ use serde::Serialize;
     #[test]
     fn test_resource_creation() {
         let resource = Resource::new("GET".to_string(), "https://example.com".to_string());
-        
+
         assert_eq!(resource.method, "GET");
         assert_eq!(resource.url, "https://example.com");
         assert_eq!(resource.ttfb_ms, 0);
@@ -61,7 +72,7 @@ use serde::Serialize;
         let mut resource = Resource::new("GET".to_string(), "https://example.com".to_string());
         resource.status_code = Some(200);
         resource.mbps = Some(1.5);
-        
+
         let json = serde_json::to_string(&resource).unwrap();
         assert!(json.contains("\"method\":\"GET\""));
         assert!(json.contains("\"url\":\"https://example.com\""));
@@ -72,7 +83,7 @@ use serde::Serialize;
     #[test]
     fn test_inventory_creation() {
         let inventory = Inventory::new();
-        
+
         assert!(inventory.entry_url.is_none());
         assert!(inventory.device_type.is_none());
         assert!(inventory.resources.is_empty());
@@ -83,10 +94,10 @@ use serde::Serialize;
         let mut inventory = Inventory::new();
         inventory.entry_url = Some("https://example.com".to_string());
         inventory.device_type = Some(DeviceType::Mobile);
-        
+
         let resource = Resource::new("GET".to_string(), "https://example.com".to_string());
         inventory.resources.push(resource);
-        
+
         // 2スペースインデントで整形
         let mut buf = Vec::new();
         let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
@@ -112,13 +123,13 @@ use serde::Serialize;
                 }
             ]
         }"#;
-        
+
         let inventory: Inventory = serde_json::from_str(json).unwrap();
-        
+
         assert_eq!(inventory.entry_url, Some("https://example.com".to_string()));
         assert_eq!(inventory.device_type, Some(DeviceType::Mobile));
         assert_eq!(inventory.resources.len(), 1);
-        
+
         let resource = &inventory.resources[0];
         assert_eq!(resource.method, "GET");
         assert_eq!(resource.url, "https://example.com");
@@ -132,7 +143,7 @@ use serde::Serialize;
             chunk: b"test data".to_vec(),
             target_time: 1000,
         };
-        
+
         assert_eq!(chunk.chunk, b"test data");
         assert_eq!(chunk.target_time, 1000);
     }

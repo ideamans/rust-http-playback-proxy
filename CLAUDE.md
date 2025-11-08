@@ -31,6 +31,25 @@ cargo install cargo-tarpaulin  # First time only
 cargo tarpaulin --out Html --output-dir coverage
 ```
 
+## Pre-Commit Checklist
+
+**IMPORTANT**: Before committing any changes, always run the following commands in order:
+
+```bash
+# 1. Format code
+cargo fmt
+
+# 2. Run linter (fix any warnings)
+cargo clippy
+
+# 3. Run unit tests (ensure all tests pass)
+cargo test
+
+# Only commit if all three steps complete successfully
+```
+
+This ensures code quality and prevents broken commits from entering the repository.
+
 ## CLI Interface
 
 ```bash

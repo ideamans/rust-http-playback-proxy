@@ -1,19 +1,18 @@
 use http_body_util::{BodyExt, Full};
 use hudsucker::{
-    hyper::Request, hyper::Response, HttpContext, HttpHandler,
-    RequestOrResponse, Body,
+    Body, HttpContext, HttpHandler, RequestOrResponse, hyper::Request, hyper::Response,
 };
+use std::collections::{HashMap, VecDeque};
+use std::future::Future;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
-use std::future::Future;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
 
-use crate::types::{Inventory, Resource};
 use super::processor::RequestProcessor;
 use crate::traits::{RealFileSystem, RealTimeProvider};
+use crate::types::{Inventory, Resource};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
@@ -117,7 +116,8 @@ impl HttpHandler for RecordingHandler {
             // Use connection-based FIFO: push to the back of this client's queue
             {
                 let mut infos = request_infos.lock().await;
-                infos.entry(client_addr)
+                infos
+                    .entry(client_addr)
                     .or_insert_with(VecDeque::new)
                     .push_back(RequestInfo {
                         method: method.to_string(),
@@ -182,10 +182,13 @@ impl HttpHandler for RecordingHandler {
 
                 // Calculate download end time relative to request start (not proxy start)
                 let download_end = Instant::now();
-                let download_end_ms = download_end.duration_since(info.request_start).as_millis() as u64;
+                let download_end_ms =
+                    download_end.duration_since(info.request_start).as_millis() as u64;
 
-                info!("Matched response with request: {} {} (TTFB: {}ms, download_end: {}ms, request offset: {}ms)",
-                      info.method, info.url, ttfb, download_end_ms, info.elapsed_since_start);
+                info!(
+                    "Matched response with request: {} {} (TTFB: {}ms, download_end: {}ms, request offset: {}ms)",
+                    info.method, info.url, ttfb, download_end_ms, info.elapsed_since_start
+                );
 
                 (info.method, info.url, ttfb_ms, download_end_ms)
             } else {
@@ -193,8 +196,14 @@ impl HttpHandler for RecordingHandler {
                 error!("No matching request info found for client: {}", client_addr);
                 let elapsed = ttfb_instant.duration_since(*start_time).as_millis() as u64;
                 let download_end = Instant::now();
-                let download_end_elapsed = download_end.duration_since(*start_time).as_millis() as u64;
-                ("GET".to_string(), "unknown".to_string(), elapsed, download_end_elapsed)
+                let download_end_elapsed =
+                    download_end.duration_since(*start_time).as_millis() as u64;
+                (
+                    "GET".to_string(),
+                    "unknown".to_string(),
+                    elapsed,
+                    download_end_elapsed,
+                )
             };
 
             // Create resource
@@ -211,12 +220,16 @@ impl HttpHandler for RecordingHandler {
                     let header_name = name.to_string();
                     let value_string = value_str.to_string();
 
-                    resource_headers.entry(header_name)
+                    resource_headers
+                        .entry(header_name)
                         .and_modify(|existing| {
                             // If header already exists, convert to Multiple or append to existing Multiple
                             match existing {
                                 crate::types::HeaderValue::Single(first) => {
-                                    *existing = crate::types::HeaderValue::Multiple(vec![first.clone(), value_string.clone()]);
+                                    *existing = crate::types::HeaderValue::Multiple(vec![
+                                        first.clone(),
+                                        value_string.clone(),
+                                    ]);
                                 }
                                 crate::types::HeaderValue::Multiple(values) => {
                                     values.push(value_string.clone());
@@ -231,7 +244,8 @@ impl HttpHandler for RecordingHandler {
             // Detect content-encoding
             if let Some(encoding_header) = headers.get("content-encoding") {
                 if let Ok(encoding_str) = encoding_header.to_str() {
-                    if let Ok(encoding) = encoding_str.parse::<crate::types::ContentEncodingType>() {
+                    if let Ok(encoding) = encoding_str.parse::<crate::types::ContentEncodingType>()
+                    {
                         resource.content_encoding = Some(encoding);
                     }
                 }
@@ -239,7 +253,10 @@ impl HttpHandler for RecordingHandler {
 
             // Process response body
             let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
-            if let Err(e) = processor.process_response_body(&mut resource, &body_bytes, content_type).await {
+            if let Err(e) = processor
+                .process_response_body(&mut resource, &body_bytes, content_type)
+                .await
+            {
                 error!("Failed to process response body: {}", e);
             }
 

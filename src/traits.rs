@@ -131,7 +131,7 @@ impl TimeProvider for RealTimeProvider {
 
     fn elapsed_since(&self, start: u64) -> u64 {
         let now = self.now_ms();
-        if now >= start { now - start } else { 0 }
+        now.saturating_sub(start)
     }
 }
 
@@ -144,8 +144,8 @@ impl PortFinder for RealPortFinder {
 #[cfg(test)]
 pub mod mocks {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
 
     /// Mock HTTP client for testing
     pub struct MockHttpClient {
@@ -163,7 +163,10 @@ pub mod mocks {
         }
 
         pub fn set_response(&self, key: &str, response: HttpResponse) {
-            self.responses.lock().unwrap().insert(key.to_string(), response);
+            self.responses
+                .lock()
+                .unwrap()
+                .insert(key.to_string(), response);
         }
 
         pub fn get_requests(&self) -> Vec<(String, String)> {
@@ -180,8 +183,11 @@ pub mod mocks {
             _headers: Option<&std::collections::HashMap<String, String>>,
             _body: Option<&[u8]>,
         ) -> Result<HttpResponse> {
-            self.requests.lock().unwrap().push((method.to_string(), url.to_string()));
-            
+            self.requests
+                .lock()
+                .unwrap()
+                .push((method.to_string(), url.to_string()));
+
             let key = format!("{}:{}", method, url);
             if let Some(response) = self.responses.lock().unwrap().get(&key) {
                 Ok(response.clone())
@@ -243,7 +249,10 @@ pub mod mocks {
 
         async fn write(&self, path: &Path, content: &[u8]) -> Result<()> {
             let path_str = path.to_string_lossy().to_string();
-            self.files.lock().unwrap().insert(path_str, content.to_vec());
+            self.files
+                .lock()
+                .unwrap()
+                .insert(path_str, content.to_vec());
             Ok(())
         }
 

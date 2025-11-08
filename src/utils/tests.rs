@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::utils::{find_available_port, get_port_or_default, generate_file_path_from_url, 
-               is_text_resource, extract_charset_from_content_type};
+    use crate::utils::{
+        extract_charset_from_content_type, find_available_port, generate_file_path_from_url,
+        get_port_or_default, is_text_resource,
+    };
 
     #[test]
     #[allow(unused_comparisons)]
@@ -29,28 +31,36 @@ mod tests {
 
     #[test]
     fn test_generate_file_path_from_url_with_path() {
-        let result = generate_file_path_from_url("https://example.com/path/to/resource.js", "GET").unwrap();
+        let result =
+            generate_file_path_from_url("https://example.com/path/to/resource.js", "GET").unwrap();
         assert_eq!(result, "get/https/example.com/path/to/resource.js");
     }
 
     #[test]
     fn test_generate_file_path_from_url_with_short_query() {
-        let result = generate_file_path_from_url("https://example.com/path/resource?param=value", "GET").unwrap();
+        let result =
+            generate_file_path_from_url("https://example.com/path/resource?param=value", "GET")
+                .unwrap();
         assert_eq!(result, "get/https/example.com/path/resource~param%3Dvalue");
     }
 
     #[test]
     fn test_generate_file_path_from_url_with_long_query() {
         let long_query = "a".repeat(40);
-        let result = generate_file_path_from_url(&format!("https://example.com/resource?{}", long_query), "GET").unwrap();
-        
+        let result = generate_file_path_from_url(
+            &format!("https://example.com/resource?{}", long_query),
+            "GET",
+        )
+        .unwrap();
+
         assert!(result.starts_with("get/https/example.com/resource~"));
         assert!(result.contains(".~"));
     }
 
     #[test]
     fn test_generate_file_path_from_url_with_extension() {
-        let result = generate_file_path_from_url("https://example.com/script.js?v=1", "GET").unwrap();
+        let result =
+            generate_file_path_from_url("https://example.com/script.js?v=1", "GET").unwrap();
         assert_eq!(result, "get/https/example.com/script~v%3D1.js");
     }
 
@@ -78,14 +88,8 @@ mod tests {
             extract_charset_from_content_type("text/html; charset=shift_jis; boundary=something"),
             Some("shift_jis".to_string())
         );
-        assert_eq!(
-            extract_charset_from_content_type("text/html"),
-            None
-        );
-        assert_eq!(
-            extract_charset_from_content_type("application/json"),
-            None
-        );
+        assert_eq!(extract_charset_from_content_type("text/html"), None);
+        assert_eq!(extract_charset_from_content_type("application/json"), None);
     }
 
     #[test]
@@ -95,7 +99,10 @@ mod tests {
         let url = format!("https://example.com/test?{}", query_32_chars);
         let result = generate_file_path_from_url(&url, "GET").unwrap();
         // Exactly 32 chars should not trigger hashing
-        assert_eq!(result, format!("get/https/example.com/test~{}", query_32_chars));
+        assert_eq!(
+            result,
+            format!("get/https/example.com/test~{}", query_32_chars)
+        );
 
         // Test 33 characters - should trigger hashing
         let query_33_chars = "a".repeat(33);
@@ -114,14 +121,20 @@ mod tests {
 
     #[test]
     fn test_generate_file_path_multiple_query_params() {
-        let result = generate_file_path_from_url("https://example.com/search?q=rust&page=1&sort=date", "GET").unwrap();
+        let result = generate_file_path_from_url(
+            "https://example.com/search?q=rust&page=1&sort=date",
+            "GET",
+        )
+        .unwrap();
         assert!(result.contains("~"));
         assert!(result.contains("q%3Drust"));
     }
 
     #[test]
     fn test_generate_file_path_special_chars() {
-        let result = generate_file_path_from_url("https://example.com/path with spaces.html", "GET").unwrap();
+        let result =
+            generate_file_path_from_url("https://example.com/path with spaces.html", "GET")
+                .unwrap();
         assert!(result.contains("path"));
 
         let result = generate_file_path_from_url("https://example.com/日本語.html", "GET").unwrap();
@@ -193,7 +206,9 @@ mod tests {
 
         // Multiple parameters
         assert_eq!(
-            extract_charset_from_content_type("multipart/form-data; boundary=----WebKitFormBoundary; charset=utf-8"),
+            extract_charset_from_content_type(
+                "multipart/form-data; boundary=----WebKitFormBoundary; charset=utf-8"
+            ),
             Some("utf-8".to_string())
         );
 

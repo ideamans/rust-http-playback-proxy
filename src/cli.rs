@@ -1,6 +1,6 @@
+use crate::types::DeviceType;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use crate::types::DeviceType;
 
 #[derive(Parser)]
 #[command(name = "http-playback-proxy")]
@@ -17,22 +17,40 @@ pub enum Commands {
         #[arg(help = "Entry URL to start recording from")]
         entry_url: Option<String>,
 
-        #[arg(short, long, help = "Port to use for the proxy server (default: auto-detect from 8080)")]
+        #[arg(
+            short,
+            long,
+            help = "Port to use for the proxy server (default: auto-detect from 8080)"
+        )]
         port: Option<u16>,
 
         #[arg(short, long, default_value = "mobile", help = "Device type")]
         device: DeviceType,
 
-        #[arg(short, long, default_value = "./inventory", help = "Inventory directory")]
+        #[arg(
+            short,
+            long,
+            default_value = "./inventory",
+            help = "Inventory directory"
+        )]
         inventory: PathBuf,
     },
 
     #[command(about = "Playback recorded HTTP traffic")]
     Playback {
-        #[arg(short, long, help = "Port to use for the proxy server (default: auto-detect from 8080)")]
+        #[arg(
+            short,
+            long,
+            help = "Port to use for the proxy server (default: auto-detect from 8080)"
+        )]
         port: Option<u16>,
 
-        #[arg(short, long, default_value = "./inventory", help = "Inventory directory")]
+        #[arg(
+            short,
+            long,
+            default_value = "./inventory",
+            help = "Inventory directory"
+        )]
         inventory: PathBuf,
     },
 }

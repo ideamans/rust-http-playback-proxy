@@ -1,27 +1,27 @@
 #[cfg(test)]
 mod tests {
-    use crate::types::{DeviceType, Inventory, Resource, ContentEncodingType};
+    use crate::types::{ContentEncodingType, DeviceType, Inventory, Resource};
     use serde::Serialize;
+    use std::sync::Arc;
     use tempfile::TempDir;
     use tokio;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_load_inventory() {
         use crate::playback::load_inventory;
         use crate::traits::RealFileSystem;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
-        
+
         // Create a test inventory file
         let mut inventory = Inventory::new();
         inventory.entry_url = Some("https://example.com".to_string());
         inventory.device_type = Some(DeviceType::Desktop);
-        
+
         let resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
         inventory.resources.push(resource);
-        
+
         // Save the inventory
         tokio::fs::create_dir_all(&inventory_dir).await.unwrap();
         let inventory_path = inventory_dir.join("inventory.json");
@@ -31,12 +31,19 @@ mod tests {
         let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
         inventory.serialize(&mut ser).unwrap();
         let inventory_json = String::from_utf8(buf).unwrap();
-        tokio::fs::write(&inventory_path, inventory_json).await.unwrap();
-        
+        tokio::fs::write(&inventory_path, inventory_json)
+            .await
+            .unwrap();
+
         // Test loading
-        let loaded_inventory = load_inventory(&inventory_dir, std::sync::Arc::new(RealFileSystem)).await.unwrap();
-        
-        assert_eq!(loaded_inventory.entry_url, Some("https://example.com".to_string()));
+        let loaded_inventory = load_inventory(&inventory_dir, std::sync::Arc::new(RealFileSystem))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            loaded_inventory.entry_url,
+            Some("https://example.com".to_string())
+        );
         assert_eq!(loaded_inventory.device_type, Some(DeviceType::Desktop));
         assert_eq!(loaded_inventory.resources.len(), 1);
     }
@@ -45,26 +52,32 @@ mod tests {
     async fn test_convert_resources_to_transactions() {
         use crate::playback::transaction::convert_resources_to_transactions;
         use crate::traits::RealFileSystem;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
-        
+
         let mut inventory = Inventory::new();
-        
+
         // Create a test resource with UTF-8 content
         let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
         resource.status_code = Some(200);
         resource.ttfb_ms = 100;
         resource.content_utf8 = Some("Hello, World!".to_string());
         resource.mbps = Some(2.0);
-        
+
         inventory.resources.push(resource);
-        
+
         // Convert to transactions
-        let transactions = convert_resources_to_transactions(&inventory, &inventory_dir, std::sync::Arc::new(RealFileSystem)).await.unwrap();
-        
+        let transactions = convert_resources_to_transactions(
+            &inventory,
+            &inventory_dir,
+            std::sync::Arc::new(RealFileSystem),
+        )
+        .await
+        .unwrap();
+
         assert_eq!(transactions.len(), 1);
-        
+
         let transaction = &transactions[0];
         assert_eq!(transaction.method, "GET");
         assert_eq!(transaction.url, "https://example.com/test");
@@ -77,12 +90,12 @@ mod tests {
     async fn test_convert_resource_with_file() {
         use crate::playback::transaction::convert_resource_to_transaction;
         use crate::traits::RealFileSystem;
-        
+
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
         let contents_dir = inventory_dir.join("contents");
         tokio::fs::create_dir_all(&contents_dir).await.unwrap();
-        
+
         // Create a test file
         let test_content = b"Test file content";
         let file_path = "get/https/example.com/test.txt";
@@ -90,29 +103,40 @@ mod tests {
         if let Some(parent) = full_file_path.parent() {
             tokio::fs::create_dir_all(parent).await.unwrap();
         }
-        tokio::fs::write(&full_file_path, test_content).await.unwrap();
-        
+        tokio::fs::write(&full_file_path, test_content)
+            .await
+            .unwrap();
+
         // Create a resource that references this file
-        let mut resource = Resource::new("GET".to_string(), "https://example.com/test.txt".to_string());
+        let mut resource = Resource::new(
+            "GET".to_string(),
+            "https://example.com/test.txt".to_string(),
+        );
         resource.status_code = Some(200);
         resource.ttfb_ms = 50;
         resource.content_file_path = Some(format!("contents/{}", file_path));
         resource.mbps = Some(1.0);
-        
+
         // Convert to transaction
-        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, std::sync::Arc::new(RealFileSystem)).await.unwrap();
-        
+        let transaction = convert_resource_to_transaction(
+            &resource,
+            &inventory_dir,
+            std::sync::Arc::new(RealFileSystem),
+        )
+        .await
+        .unwrap();
+
         assert!(transaction.is_some());
         let transaction = transaction.unwrap();
-        
+
         assert_eq!(transaction.method, "GET");
         assert_eq!(transaction.url, "https://example.com/test.txt");
         assert_eq!(transaction.ttfb, 50);
         assert_eq!(transaction.status_code, Some(200));
-        
+
         // Check that chunks were created
         assert!(!transaction.chunks.is_empty());
-        
+
         // Verify content by combining chunks
         let mut combined_content = Vec::new();
         for chunk in &transaction.chunks {
@@ -152,21 +176,21 @@ mod tests {
     #[test]
     fn test_minify_content() {
         use crate::playback::transaction::minify_content;
-        
+
         // Test HTML minification
         let html_content = b"<html>\n  <body>\n    <h1>Test</h1>\n  </body>\n</html>";
         let minified = minify_content(html_content, &Some("text/html".to_string())).unwrap();
         let minified_str = String::from_utf8(minified).unwrap();
-        
+
         // Should have fewer newlines and spaces
         assert!(minified_str.len() <= html_content.len());
         assert!(!minified_str.contains("  ")); // No double spaces
-        
+
         // Test CSS minification
         let css_content = b"body {\n  margin: 0;\n  padding: 0;\n}";
         let minified = minify_content(css_content, &Some("text/css".to_string())).unwrap();
         let minified_str = String::from_utf8(minified).unwrap();
-        
+
         // Should be more compact
         assert!(minified_str.len() <= css_content.len());
     }
@@ -207,12 +231,15 @@ mod tests {
         let (chunks, target_close_time) = create_chunks(&content, &resource).unwrap();
 
         // Verify multiple chunks were created
-        assert!(chunks.len() > 1, "Expected multiple chunks for 128KB content");
+        assert!(
+            chunks.len() > 1,
+            "Expected multiple chunks for 128KB content"
+        );
 
         // Verify timing increases monotonically
         for i in 1..chunks.len() {
             assert!(
-                chunks[i].target_time >= chunks[i-1].target_time,
+                chunks[i].target_time >= chunks[i - 1].target_time,
                 "Chunk {} target_time should be >= previous chunk",
                 i
             );
@@ -239,7 +266,11 @@ mod tests {
             // For testing, we just verify the calculation is reasonable
             // (not testing actual sleep timing here)
             if i > 0 {
-                assert!(relative_delay > 0, "Chunk {} should have positive delay from previous", i);
+                assert!(
+                    relative_delay > 0,
+                    "Chunk {} should have positive delay from previous",
+                    i
+                );
 
                 // Based on 64KB chunks at 1 Mbps:
                 // 64KB = 65536 bytes = 524288 bits
@@ -249,7 +280,8 @@ mod tests {
                 assert!(
                     relative_delay >= 400 && relative_delay <= 700,
                     "Chunk {} delay {}ms is outside expected range (400-700ms) for 64KB at 1Mbps",
-                    i, relative_delay
+                    i,
+                    relative_delay
                 );
             }
 
@@ -268,7 +300,8 @@ mod tests {
             actual_total_time >= expected_total_time - tolerance
                 && actual_total_time <= expected_total_time + tolerance,
             "Total transfer time {}ms should be within 10% of expected {}ms",
-            actual_total_time, expected_total_time
+            actual_total_time,
+            expected_total_time
         );
     }
 
@@ -278,13 +311,14 @@ mod tests {
 
         // Test with different bandwidths
         let test_cases = vec![
-            (1.0, 1024, 100),    // 1 Mbps, 1KB, 100ms TTFB
-            (10.0, 10240, 50),   // 10 Mbps, 10KB, 50ms TTFB
-            (0.5, 512, 200),     // 0.5 Mbps, 512B, 200ms TTFB
+            (1.0, 1024, 100),  // 1 Mbps, 1KB, 100ms TTFB
+            (10.0, 10240, 50), // 10 Mbps, 10KB, 50ms TTFB
+            (0.5, 512, 200),   // 0.5 Mbps, 512B, 200ms TTFB
         ];
 
         for (mbps, content_size, ttfb) in test_cases {
-            let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
+            let mut resource =
+                Resource::new("GET".to_string(), "https://example.com/test".to_string());
             resource.ttfb_ms = ttfb;
             resource.mbps = Some(mbps);
 
@@ -392,16 +426,21 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
 
-        let mut resource = Resource::new("GET".to_string(), "https://example.com/error".to_string());
+        let mut resource =
+            Resource::new("GET".to_string(), "https://example.com/error".to_string());
         resource.error_message = Some("Connection timeout".to_string());
         resource.status_code = Some(504);
         resource.ttfb_ms = 5000;
         // Add dummy content so the transaction is created
         resource.content_utf8 = Some("Gateway Timeout".to_string());
 
-        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, std::sync::Arc::new(RealFileSystem))
-            .await
-            .unwrap();
+        let transaction = convert_resource_to_transaction(
+            &resource,
+            &inventory_dir,
+            std::sync::Arc::new(RealFileSystem),
+        )
+        .await
+        .unwrap();
 
         assert!(transaction.is_some());
         let tx = transaction.unwrap();
@@ -413,9 +452,14 @@ mod tests {
     fn test_minify_javascript_content() {
         use crate::playback::transaction::minify_content;
 
-        let js_with_comments = b"// This is a comment\nfunction test() {\n  // Another comment\n  return 42;\n}";
+        let js_with_comments =
+            b"// This is a comment\nfunction test() {\n  // Another comment\n  return 42;\n}";
 
-        let minified = minify_content(js_with_comments, &Some("application/javascript".to_string())).unwrap();
+        let minified = minify_content(
+            js_with_comments,
+            &Some("application/javascript".to_string()),
+        )
+        .unwrap();
         let minified_str = String::from_utf8(minified).unwrap();
 
         // Should be more compact
@@ -434,7 +478,10 @@ mod tests {
 
         // Create invalid JSON file
         let inventory_path = inventory_dir.join("inventory.json");
-        mock_fs.set_file(&inventory_path.to_string_lossy(), b"{ invalid json".to_vec());
+        mock_fs.set_file(
+            &inventory_path.to_string_lossy(),
+            b"{ invalid json".to_vec(),
+        );
 
         // Should fail gracefully
         let result = load_inventory(&inventory_dir, mock_fs).await;
