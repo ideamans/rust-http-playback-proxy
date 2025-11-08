@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 - `src/` hosts the Rust proxy core (`cli`, `recording`, `playback`, `types`, `utils`) plus `main.rs` for CLI wiring.
 - `tests/` carries integration cases that drive end-to-end record/playback through Tokio.
-- `accept/`, `golang/`, and `typescript/` hold cross-language acceptance suites and wrapper packages; keep their READMEs aligned with CLI flags and released binaries.
+- `acceptance/`, `golang/`, and `typescript/` hold cross-language acceptance suites and wrapper packages; keep their READMEs aligned with CLI flags and released binaries.
 - `reference/types.ts` defines the shared inventory schema; update it with `types.rs` changes and leave CI-generated `coverage/` or `cobertura.xml` untouched.
 
 ## Build, Test, and Development Commands
@@ -11,7 +11,7 @@
 - `cargo build --release` outputs `target/release/http-playback-proxy`, the binary consumed by wrappers.
 - `cargo run -- recording --inventory ./sessions/foo` (or `-- playback`) is the quickest manual smoke.
 - `cargo fmt --all` (or `-- --check`) and `cargo clippy --all-targets -- -D warnings` guard formatting and linting.
-- `cargo test`, `cd accept/golang && go test -v`, and `cd accept/typescript && npm test` mirror the CI matrix.
+- `cargo test`, `cd acceptance/golang && go test -v`, and `cd acceptance/typescript && npm test` mirror the CI matrix.
 
 ## Coding Style & Naming Conventions
 - Stick to Rust 2024 defaults: 4-space indent, `snake_case` modules/functions, `UpperCamelCase` types, `SCREAMING_SNAKE_CASE` constants.

@@ -14,7 +14,7 @@ These tests ensure that the Go and TypeScript wrappers work correctly in product
 ## Structure
 
 ```
-accept/
+acceptance/
 ├── golang/          # Go acceptance tests
 │   ├── go.mod       # Go module with local dependency
 │   ├── main_test.go # Test implementation

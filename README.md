@@ -433,7 +433,7 @@ golang/v0.0.0 タグ & npm publish
 
 ## 受け入れテスト
 
-`accept/` ディレクトリには、本番環境に近い状態で動作を検証する受け入れテストが含まれています。
+`acceptance/` ディレクトリには、本番環境に近い状態で動作を検証する受け入れテストが含まれています。
 
 ### テスト内容
 
@@ -452,20 +452,20 @@ golang/v0.0.0 タグ & npm publish
 
 **Go:**
 ```bash
-cd accept/golang
+cd acceptance/golang
 go test -v -timeout 5m
 ```
 
 **TypeScript:**
 ```bash
-cd accept/typescript
+cd acceptance/typescript
 npm install
 npm test
 ```
 
 詳細は各ディレクトリのREADMEを参照してください：
-- [accept/golang/README.md](accept/golang/README.md)
-- [accept/typescript/README.md](accept/typescript/README.md)
+- [acceptance/golang/README.md](acceptance/golang/README.md)
+- [acceptance/typescript/README.md](acceptance/typescript/README.md)
 
 ## 更新履歴
 
