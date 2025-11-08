@@ -1,0 +1,178 @@
+name: Acceptance Tests
+
+on:
+  push:
+    branches: [ main, develop, charset ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: http-playback-proxy-linux
+          path: target/release/http-playback-proxy
+          retention-days: 1
+
+  test-content:
+    name: Content Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: http-playback-proxy-linux
+          path: target/release/
+
+      - name: Make binary executable
+        run: chmod +x target/release/http-playback-proxy
+
+      - name: Run content acceptance test
+        run: |
+          cd acceptance/content
+          cargo build --release
+          ./target/release/content-test
+
+  test-performance:
+    name: Performance Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: http-playback-proxy-linux
+          path: target/release/
+
+      - name: Make binary executable
+        run: chmod +x target/release/http-playback-proxy
+
+      - name: Run performance acceptance test
+        run: |
+          cd acceptance/performance
+          cargo build --release
+          ./target/release/performance-test
+
+  test-golang:
+    name: Go Wrapper Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: http-playback-proxy-linux
+          path: target/release/
+
+      - name: Make binary executable
+        run: chmod +x target/release/http-playback-proxy
+
+      - name: Run Go acceptance test
+        run: |
+          cd acceptance/golang
+          go test -v -timeout 5m
+
+  test-typescript:
+    name: TypeScript Wrapper Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download binary
+        uses: actions/download-artifact@v4
+        with:
+          name: http-playback-proxy-linux
+          path: target/release/
+
+      - name: Make binary executable
+        run: chmod +x target/release/http-playback-proxy
+
+      - name: Run TypeScript acceptance test
+        run: |
+          cd acceptance/typescript
+          npm install
+          npm test
+
+  test-summary:
+    name: Test Summary
+    needs: [test-content, test-performance, test-golang, test-typescript]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check test results
+        run: |
+          echo "==================================="
+          echo "  Acceptance Tests Summary"
+          echo "==================================="
+          echo "Content Test: ${{ needs.test-content.result }}"
+          echo "Performance Test: ${{ needs.test-performance.result }}"
+          echo "Go Test: ${{ needs.test-golang.result }}"
+          echo "TypeScript Test: ${{ needs.test-typescript.result }}"
+          echo "==================================="
+
+          # Fail if any test failed
+          if [ "${{ needs.test-content.result }}" != "success" ] || \
+             [ "${{ needs.test-performance.result }}" != "success" ] || \
+             [ "${{ needs.test-golang.result }}" != "success" ] || \
+             [ "${{ needs.test-typescript.result }}" != "success" ]; then
+            echo "❌ Some tests failed"
+            exit 1
+          fi
+
+          echo "✅ All acceptance tests passed!"
