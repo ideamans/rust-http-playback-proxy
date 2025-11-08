@@ -4,9 +4,12 @@ on:
   push:
     branches:
       - main
+      - develop
+      - charset
   pull_request:
     branches:
       - main
+      - develop
   workflow_dispatch:
 
 jobs:
@@ -170,9 +173,32 @@ jobs:
         run: ./run.sh
         timeout-minutes: 5
 
+  test-content:
+    name: Content Acceptance Test - ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run content acceptance test
+        working-directory: acceptance/content
+        run: make test
+        timeout-minutes: 5
+
   summary:
     name: Test Summary
-    needs: [test-golang, test-typescript, test-performance, test-minimum]
+    needs: [test-golang, test-typescript, test-performance, test-minimum, test-content]
     runs-on: ubuntu-latest
     if: always()
 
@@ -182,12 +208,14 @@ jobs:
           if [ "${{ needs.test-golang.result }}" != "success" ] || \
              [ "${{ needs.test-typescript.result }}" != "success" ] || \
              [ "${{ needs.test-performance.result }}" != "success" ] || \
-             [ "${{ needs.test-minimum.result }}" != "success" ]; then
+             [ "${{ needs.test-minimum.result }}" != "success" ] || \
+             [ "${{ needs.test-content.result }}" != "success" ]; then
             echo "❌ Some acceptance tests failed"
             echo "Go tests: ${{ needs.test-golang.result }}"
             echo "TypeScript tests: ${{ needs.test-typescript.result }}"
             echo "Performance tests: ${{ needs.test-performance.result }}"
             echo "Minimum timing tests: ${{ needs.test-minimum.result }}"
+            echo "Content tests: ${{ needs.test-content.result }}"
             exit 1
           fi
 
