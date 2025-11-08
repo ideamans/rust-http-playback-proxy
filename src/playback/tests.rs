@@ -4,7 +4,6 @@ mod playback_tests {
     use serde::Serialize;
     use std::sync::Arc;
     use tempfile::TempDir;
-    
 
     #[tokio::test]
     async fn test_load_inventory() {

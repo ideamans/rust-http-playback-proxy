@@ -298,7 +298,6 @@ fn get_binary_path() -> PathBuf {
     release_path.push("http-playback-proxy");
 
     // Prefer debug binary for testing (more logging)
-    
 
     if debug_path.exists() {
         println!("Using debug binary: {}", debug_path.display());

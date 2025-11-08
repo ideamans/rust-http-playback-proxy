@@ -4,7 +4,7 @@ mod types_tests {
         BodyChunk, ContentEncodingType, DeviceType, Inventory, Resource, Transaction,
     };
     use serde::Serialize;
-    
+
     use std::str::FromStr;
 
     #[test]

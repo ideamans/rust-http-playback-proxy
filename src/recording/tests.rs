@@ -2,7 +2,6 @@
 mod recording_tests {
     use crate::types::{DeviceType, Inventory};
     use tempfile::TempDir;
-    
 
     #[tokio::test]
     async fn test_processor_creation() {
