@@ -56,23 +56,56 @@ struct TimingMeasurement {
 
 fn test_resources() -> Vec<TestResource> {
     vec![
+        // Size variations with fixed TTFB and transfer duration
         TestResource {
-            path: "/small".to_string(),
-            size_bytes: 10 * 1024,      // 10KB
-            ttfb_ms: 500,                // 500ms TTFB
-            transfer_duration_ms: 100,   // 100ms transfer
+            path: "/small-fast".to_string(),
+            size_bytes: 10 * 1024,       // 10KB
+            ttfb_ms: 100,                // 100ms TTFB (fast)
+            transfer_duration_ms: 50,    // 50ms transfer (fast)
         },
         TestResource {
-            path: "/medium".to_string(),
+            path: "/medium-fast".to_string(),
             size_bytes: 100 * 1024,      // 100KB
-            ttfb_ms: 1000,               // 1s TTFB
-            transfer_duration_ms: 500,   // 500ms transfer
+            ttfb_ms: 100,                // 100ms TTFB (fast)
+            transfer_duration_ms: 200,   // 200ms transfer (medium)
         },
         TestResource {
-            path: "/large".to_string(),
+            path: "/large-fast".to_string(),
             size_bytes: 1024 * 1024,     // 1MB
-            ttfb_ms: 2000,               // 2s TTFB
-            transfer_duration_ms: 2000,  // 2s transfer
+            ttfb_ms: 100,                // 100ms TTFB (fast)
+            transfer_duration_ms: 2000,  // 2s transfer (slow)
+        },
+
+        // TTFB variations with fixed size and transfer duration
+        TestResource {
+            path: "/medium-slow-ttfb".to_string(),
+            size_bytes: 100 * 1024,      // 100KB
+            ttfb_ms: 2000,               // 2s TTFB (slow)
+            transfer_duration_ms: 200,   // 200ms transfer (fast)
+        },
+
+        // Transfer speed variations with fixed size and TTFB
+        TestResource {
+            path: "/medium-slow-transfer".to_string(),
+            size_bytes: 100 * 1024,      // 100KB
+            ttfb_ms: 500,                // 500ms TTFB (medium)
+            transfer_duration_ms: 2000,  // 2s transfer (slow)
+        },
+
+        // Edge case: Very small file with slow connection
+        TestResource {
+            path: "/tiny-slow".to_string(),
+            size_bytes: 1024,            // 1KB
+            ttfb_ms: 1000,               // 1s TTFB (slow)
+            transfer_duration_ms: 500,   // 500ms transfer (slow for 1KB)
+        },
+
+        // Edge case: Large file with fast everything
+        TestResource {
+            path: "/large-very-fast".to_string(),
+            size_bytes: 500 * 1024,      // 500KB
+            ttfb_ms: 50,                 // 50ms TTFB (very fast)
+            transfer_duration_ms: 100,   // 100ms transfer (very fast)
         },
     ]
 }
