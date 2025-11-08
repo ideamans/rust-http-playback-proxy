@@ -45,6 +45,7 @@ pub fn generate_file_path_from_url(url: &str, method: &str) -> Result<String> {
         }
 
         // Add query parameters to filename
+        #[allow(clippy::collapsible_if)]
         if let Some(query) = parsed_url.query() {
             if !query.is_empty() {
                 if query.len() <= 32 {

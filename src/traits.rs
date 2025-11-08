@@ -50,13 +50,10 @@ pub trait PortFinder: Send + Sync {
 }
 
 /// Real implementations
-pub struct RealHttpClient;
 pub struct RealFileSystem;
 pub struct RealTimeProvider {
     start_time: std::time::Instant,
 }
-
-pub struct RealPortFinder;
 
 impl RealTimeProvider {
     pub fn new() -> Self {
@@ -69,26 +66,6 @@ impl RealTimeProvider {
 impl Default for RealTimeProvider {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[async_trait]
-impl HttpClient for RealHttpClient {
-    async fn request(
-        &self,
-        _method: &str,
-        _url: &str,
-        _headers: Option<&std::collections::HashMap<String, String>>,
-        _body: Option<&[u8]>,
-    ) -> Result<HttpResponse> {
-        // TODO: Implement real HTTP client using reqwest or hyper
-        // For now, return a mock response
-        Ok(HttpResponse {
-            status_code: 200,
-            headers: std::collections::HashMap::new(),
-            body: b"Mock response".to_vec(),
-            elapsed_ms: 100,
-        })
     }
 }
 
@@ -132,12 +109,6 @@ impl TimeProvider for RealTimeProvider {
     fn elapsed_since(&self, start: u64) -> u64 {
         let now = self.now_ms();
         now.saturating_sub(start)
-    }
-}
-
-impl PortFinder for RealPortFinder {
-    fn find_available_port(&self, start_port: u16) -> Result<u16> {
-        crate::utils::find_available_port(start_port)
     }
 }
 
@@ -310,23 +281,4 @@ pub mod mocks {
         }
     }
 
-    /// Mock port finder for testing
-    pub struct MockPortFinder {
-        available_port: u16,
-    }
-
-    #[allow(dead_code)]
-    impl MockPortFinder {
-        pub fn new(port: u16) -> Self {
-            Self {
-                available_port: port,
-            }
-        }
-    }
-
-    impl PortFinder for MockPortFinder {
-        fn find_available_port(&self, _start_port: u16) -> Result<u16> {
-            Ok(self.available_port)
-        }
-    }
 }

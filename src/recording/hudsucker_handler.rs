@@ -242,6 +242,7 @@ impl HttpHandler for RecordingHandler {
             resource.raw_headers = Some(resource_headers);
 
             // Detect content-encoding
+            #[allow(clippy::collapsible_if)]
             if let Some(encoding_header) = headers.get("content-encoding") {
                 if let Ok(encoding_str) = encoding_header.to_str() {
                     if let Ok(encoding) = encoding_str.parse::<crate::types::ContentEncodingType>()

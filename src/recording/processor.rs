@@ -69,6 +69,7 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         // This is the actual network transfer speed, excluding latency/TTFB
         // where download_time = download_end_ms - ttfb_ms
         let body_size = body.len() as f64; // Use compressed body size (what was actually transferred)
+        #[allow(clippy::collapsible_if)]
         if let Some(download_end_ms) = resource.download_end_ms {
             if download_end_ms > resource.ttfb_ms {
                 let download_time_ms = download_end_ms - resource.ttfb_ms;
