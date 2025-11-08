@@ -80,9 +80,36 @@ pub async fn start_recording_proxy(
         }
 
         // Wait for async file writes to complete before exiting
-        // This is a temporary workaround - ideally we should track pending writes
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-        info!("Waiting for file writes to complete...");
+        // Check for content files every second, up to 10 times
+        let contents_dir = inventory_dir_clone.join("contents");
+        let mut all_files_exist = false;
+
+        for attempt in 1..=10 {
+            let mut missing_count = 0;
+
+            // Check if all resources have their content files saved
+            for resource in &inventory.resources {
+                if let Some(content_path) = &resource.content_file_path {
+                    let full_path = inventory_dir_clone.join(content_path);
+                    if !tokio::fs::try_exists(&full_path).await.unwrap_or(false) {
+                        missing_count += 1;
+                    }
+                }
+            }
+
+            if missing_count == 0 {
+                info!("All content files verified (attempt {})", attempt);
+                all_files_exist = true;
+                break;
+            } else {
+                info!("Waiting for {} content files to be written (attempt {}/10)", missing_count, attempt);
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        }
+
+        if !all_files_exist {
+            error!("Some content files may not have been written after 10 seconds");
+        }
 
         std::process::exit(0);
     });
