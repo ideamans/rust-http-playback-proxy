@@ -14,11 +14,40 @@ help:
 	@echo "  make clean            - Clean all build artifacts"
 	@echo ""
 
+# Detect platform
+UNAME_S := $(shell uname -s)
+UNAME_M := $(shell uname -m)
+
+ifeq ($(UNAME_S),Darwin)
+    ifeq ($(UNAME_M),arm64)
+        PLATFORM := darwin-arm64
+    else
+        PLATFORM := darwin-amd64
+    endif
+else ifeq ($(UNAME_S),Linux)
+    ifeq ($(UNAME_M),aarch64)
+        PLATFORM := linux-arm64
+    else
+        PLATFORM := linux-amd64
+    endif
+else
+    PLATFORM := windows-amd64
+    BINARY_EXT := .exe
+endif
+
 # Build main binary
 build:
 	@echo "Building main http-playback-proxy binary..."
-	@cd .. && cargo build --release
+	@cd .. && cargo build --release 2>&1 | grep -v "Finished" || true
 	@echo "Main binary built successfully"
+	@echo ""
+	@echo "Copying binary to language bindings ($(PLATFORM))..."
+	@mkdir -p ../typescript/bin/$(PLATFORM) ../golang/bin/$(PLATFORM)
+	@rm -f ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
+	@cp -f ../target/release/http-playback-proxy$(BINARY_EXT) ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
+	@cp -f ../target/release/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
+	@chmod +x ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
+	@echo "Binaries copied successfully"
 	@echo ""
 
 # Run all acceptance tests
