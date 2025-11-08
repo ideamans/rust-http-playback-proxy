@@ -1,14 +1,14 @@
 name: Acceptance Tests
 
 on:
+  push:
+    branches:
+      - develop
+      - main
   pull_request:
     branches:
+      - develop
       - main
-    paths:
-      - 'golang/bin/**'
-      - 'typescript/bin/**'
-      - 'accept/**'
-      - '.github/workflows/acceptance-test.yml'
   workflow_dispatch:
 
 jobs:
@@ -57,11 +57,11 @@ jobs:
           ls -lh "$BINARY_PATH" || true
 
       - name: Download Go dependencies
-        working-directory: accept/golang
+        working-directory: acceptance/golang
         run: go mod download
 
       - name: Run Go acceptance test
-        working-directory: accept/golang
+        working-directory: acceptance/golang
         run: go test -v -timeout 5m
         env:
           # Force use of local binaries (don't download from GitHub)
@@ -116,11 +116,11 @@ jobs:
         run: npm run build
 
       - name: Install test dependencies
-        working-directory: accept/typescript
+        working-directory: acceptance/typescript
         run: npm install
 
       - name: Run TypeScript acceptance test
-        working-directory: accept/typescript
+        working-directory: acceptance/typescript
         run: npm test
         env:
           # Force use of local binaries (don't download from GitHub)
