@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use crate::types::{Inventory, Resource, Transaction, BodyChunk};
 use crate::traits::FileSystem;
+use encoding_rs::{Encoding, UTF_8};
 
 const CHUNK_SIZE: usize = 1024 * 64; // 64KB chunks
 const TARGET_MBPS: f64 = 1.0; // Default target speed in Mbps
@@ -52,11 +53,16 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
     };
 
     // Process content based on minify flag
-    let processed_content = if resource.minify.unwrap_or(false) {
+    let mut processed_content = if resource.minify.unwrap_or(false) {
         minify_content(&content, &resource.content_type_mime)?
     } else {
         content
     };
+
+    // Re-encode to original charset if this is a text resource with original_charset
+    if let Some(original_charset) = &resource.original_charset {
+        processed_content = re_encode_to_charset(&processed_content, original_charset)?;
+    }
 
     // Compress content if needed
     let final_content = if let Some(encoding) = &resource.content_encoding {
@@ -73,9 +79,12 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
     // Update content-length
     headers.insert("content-length".to_string(), final_content.len().to_string());
 
-    // Update charset if it's a text resource
+    // Update charset - use original_charset if available, otherwise fall back to content_type_charset
     if let Some(mime_type) = &resource.content_type_mime {
-        if let Some(charset) = &resource.content_type_charset {
+        let charset_to_use = resource.original_charset.as_ref()
+            .or(resource.content_type_charset.as_ref());
+
+        if let Some(charset) = charset_to_use {
             headers.insert("content-type".to_string(), format!("{}; charset={}", mime_type, charset));
         } else {
             headers.insert("content-type".to_string(), mime_type.clone());
@@ -213,7 +222,7 @@ pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Resul
             use flate2::write::GzEncoder;
             use flate2::Compression;
             use std::io::Write;
-            
+
             let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(content)?;
             Ok(encoder.finish()?)
@@ -222,7 +231,7 @@ pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Resul
             use flate2::write::DeflateEncoder;
             use flate2::Compression;
             use std::io::Write;
-            
+
             let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
             encoder.write_all(content)?;
             Ok(encoder.finish()?)
@@ -238,5 +247,23 @@ pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Resul
         }
         _ => Ok(content.to_vec()),
     }
+}
+
+pub fn re_encode_to_charset(content: &[u8], charset_name: &str) -> Result<Vec<u8>> {
+    // File content is stored as UTF-8, convert it back to original charset
+    let utf8_str = std::str::from_utf8(content)?;
+
+    // Get the target encoding
+    let encoding = Encoding::for_label(charset_name.as_bytes())
+        .ok_or_else(|| anyhow::anyhow!("Unknown charset: {}", charset_name))?;
+
+    // If target is UTF-8, no conversion needed
+    if encoding == UTF_8 {
+        return Ok(content.to_vec());
+    }
+
+    // Encode from UTF-8 to target charset
+    let (encoded, _encoding_used, _had_errors) = encoding.encode(utf8_str);
+    Ok(encoded.into_owned())
 }
 

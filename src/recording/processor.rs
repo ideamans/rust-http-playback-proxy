@@ -7,7 +7,6 @@ use std::sync::Arc;
 use crate::types::{Resource, ContentEncodingType};
 use crate::utils::{is_text_resource, extract_charset_from_content_type, generate_file_path_from_url};
 use crate::traits::{FileSystem, TimeProvider};
-use regex::Regex;
 
 #[allow(dead_code)]
 pub struct RequestProcessor<F: FileSystem, T: TimeProvider> {
@@ -108,14 +107,14 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         resource: &mut Resource,
         body: &[u8],
     ) -> Result<()> {
+        // Save original charset before conversion
+        resource.original_charset = resource.content_type_charset.clone();
+
         // Convert to UTF-8
-        let (mut utf8_content, _detected_encoding) = self.convert_to_utf8(body, &resource.content_type_charset);
+        let (utf8_content, _detected_encoding) = self.convert_to_utf8(body, &resource.content_type_charset);
 
-        // Update charset to UTF-8
+        // Update charset to UTF-8 (for internal storage only)
         resource.content_type_charset = Some("UTF-8".to_string());
-
-        // Remove charset declarations from HTML/CSS content
-        utf8_content = self.remove_charset_declarations(&utf8_content, &resource.content_type_mime);
 
         // Check if content was minified by beautifying and comparing line counts
         let original_lines = utf8_content.lines().count();
@@ -184,33 +183,6 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         (cow.into_owned(), encoding_used.name())
     }
 
-    #[allow(dead_code)]
-    pub fn remove_charset_declarations(&self, content: &str, mime_type: &Option<String>) -> String {
-        match mime_type.as_deref() {
-            Some("text/html") => {
-                // Replace HTML charset declarations with UTF-8
-                // Pattern 1: <meta charset="...">
-                let re_meta_charset = Regex::new(r#"(?i)<meta\s+charset\s*=\s*["']?[^"'>]+["']?\s*/?>"#).unwrap();
-                let mut result = re_meta_charset.replace_all(content, r#"<meta charset="UTF-8">"#).to_string();
-
-                // Pattern 2: <meta http-equiv="Content-Type" content="...; charset=...">
-                let re_meta_http_equiv = Regex::new(r#"(?i)<meta\s+http-equiv\s*=\s*["']?Content-Type["']?\s+content\s*=\s*["']?[^"'>]*charset=[^"'>]+["']?\s*/?>"#).unwrap();
-                result = re_meta_http_equiv.replace_all(&result, r#"<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">"#).to_string();
-
-                // Also handle reverse order: <meta content="..." http-equiv="Content-Type">
-                let re_meta_reverse = Regex::new(r#"(?i)<meta\s+content\s*=\s*["']?[^"'>]*charset=[^"'>]+["']?\s+http-equiv\s*=\s*["']?Content-Type["']?\s*/?>"#).unwrap();
-                result = re_meta_reverse.replace_all(&result, r#"<meta content="text/html; charset=UTF-8" http-equiv="Content-Type">"#).to_string();
-
-                result
-            }
-            Some("text/css") => {
-                // Remove CSS @charset declarations completely
-                let re_charset = Regex::new(r#"@charset\s+["'][^"']+["']\s*;\s*"#).unwrap();
-                re_charset.replace_all(content, "").to_string()
-            }
-            _ => content.to_string()
-        }
-    }
 
     #[allow(dead_code)]
     pub fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {

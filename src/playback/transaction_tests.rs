@@ -189,8 +189,8 @@ mod tests {
 
         // Empty content should result in empty chunks
         assert!(chunks.is_empty());
-        // target_close_time should equal ttfb for empty content
-        assert_eq!(target_close_time, resource.ttfb_ms);
+        // target_close_time should be 0 for empty content
+        assert_eq!(target_close_time, 0);
     }
 
     #[tokio::test]
@@ -237,5 +237,75 @@ mod tests {
         if !chunks.is_empty() {
             assert!(target_close_time >= chunks.last().unwrap().target_time);
         }
+    }
+
+    #[test]
+    fn test_re_encode_to_charset_utf8() {
+        let content = "テスト".as_bytes();
+        let result = re_encode_to_charset(content, "UTF-8").unwrap();
+
+        // UTF-8 to UTF-8 should be unchanged
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn test_re_encode_to_charset_shift_jis() {
+        let content = "テスト".as_bytes(); // UTF-8 encoded "テスト"
+        let result = re_encode_to_charset(content, "Shift_JIS").unwrap();
+
+        // Should be different from UTF-8
+        assert_ne!(result, content);
+
+        // Should be able to decode back to UTF-8
+        use encoding_rs::SHIFT_JIS;
+        let (decoded, _, _) = SHIFT_JIS.decode(&result);
+        assert_eq!(decoded, "テスト");
+    }
+
+    #[tokio::test]
+    async fn test_convert_resource_with_original_charset() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+
+        // Set up a file with UTF-8 content
+        let utf8_content = "テスト内容".as_bytes();
+        let content_path = inventory_dir.join("contents/get/https/example.com/index.html");
+        mock_fs.set_file(&content_path.to_string_lossy(), utf8_content.to_vec());
+
+        let mut resource = Resource::new("GET".to_string(), "https://example.com/index.html".to_string());
+        resource.content_file_path = Some("contents/get/https/example.com/index.html".to_string());
+        resource.original_charset = Some("Shift_JIS".to_string());
+        resource.content_type_mime = Some("text/html".to_string());
+        resource.content_type_charset = Some("UTF-8".to_string());
+        resource.status_code = Some(200);
+        resource.ttfb_ms = 100;
+
+        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, mock_fs)
+            .await
+            .unwrap();
+
+        assert!(transaction.is_some());
+        let transaction = transaction.unwrap();
+
+        // Verify chunks contain Shift_JIS encoded content (not UTF-8)
+        let mut combined = Vec::new();
+        for chunk in &transaction.chunks {
+            combined.extend_from_slice(&chunk.chunk);
+        }
+
+        // Content should be different from original UTF-8
+        assert_ne!(combined, utf8_content);
+
+        // Should be able to decode back to UTF-8
+        use encoding_rs::SHIFT_JIS;
+        let (decoded, _, _) = SHIFT_JIS.decode(&combined);
+        assert_eq!(decoded, "テスト内容");
+
+        // Verify Content-Type header uses original charset
+        let headers = transaction.raw_headers.unwrap();
+        let content_type = headers.get("content-type").unwrap();
+        assert!(content_type.contains("Shift_JIS"));
     }
 }
