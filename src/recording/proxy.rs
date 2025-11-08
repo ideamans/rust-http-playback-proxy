@@ -79,6 +79,11 @@ pub async fn start_recording_proxy(
             info!("Inventory saved successfully");
         }
 
+        // Wait for async file writes to complete before exiting
+        // This is a temporary workaround - ideally we should track pending writes
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        info!("Waiting for file writes to complete...");
+
         std::process::exit(0);
     });
 
