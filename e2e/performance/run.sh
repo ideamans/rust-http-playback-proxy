@@ -11,9 +11,13 @@ NC='\033[0m' # No Color
 echo -e "${YELLOW}=== HTTP Playback Proxy Performance Acceptance Test ===${NC}"
 echo ""
 
+# Get the script directory and project root
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
 # Step 1: Build the main binary
 echo -e "${YELLOW}Step 1: Building main http-playback-proxy binary...${NC}"
-cd ../..
+cd "${PROJECT_ROOT}"
 # Remove existing binary to ensure fresh build
 rm -f target/release/http-playback-proxy
 cargo build --release
@@ -26,7 +30,7 @@ echo ""
 
 # Step 2: Build the test binary
 echo -e "${YELLOW}Step 2: Building performance test binary...${NC}"
-cd acceptance/performance
+cd "${SCRIPT_DIR}"
 # Remove existing test binary to ensure fresh build
 rm -f target/release/performance-test
 cargo build --release
