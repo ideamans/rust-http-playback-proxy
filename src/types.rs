@@ -90,6 +90,7 @@ pub struct BodyChunk {
 pub struct Transaction {
     pub method: String,
     pub url: String,
+    #[allow(dead_code)] // TODO: Will be used for timing validation once playback timing issues are fixed
     pub ttfb: u64,
     pub status_code: Option<u16>,
     pub error_message: Option<String>,

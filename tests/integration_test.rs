@@ -342,19 +342,10 @@ async fn test_recording_and_playback_integration() {
     // Step 3: Make requests through recording proxy
     println!("Making requests through recording proxy...");
     let client = http_client_with_proxy(recording_proxy_port).await;
-    
-    // First, let's test with a simpler external URL instead of the static server
-    println!("Testing proxy with external URL first...");
-    let external_response = timeout(Duration::from_secs(10), client.get("http://httpbin.org/get").send())
-        .await
-        .expect("External request timeout")
-        .expect("Failed to make external request");
-    println!("External response status: {}", external_response.status());
-    let external_content = external_response.text().await.expect("Failed to read external response");
-    println!("External response content (first 100 chars): {}", 
-             &external_content.chars().take(100).collect::<String>());
-    
-    // Now test with our static server
+
+    // IMPORTANT: Test only with local static server for hermetic testing
+    // No external dependencies (httpbin.org, etc.) to ensure tests are reproducible
+    // and don't fail due to network issues or external service availability
     println!("Making request to: {}", server_url);
     let response = timeout(Duration::from_secs(10), client.get(&server_url).send())
         .await

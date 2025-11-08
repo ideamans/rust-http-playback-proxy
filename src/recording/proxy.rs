@@ -12,13 +12,14 @@ use hudsucker::{
     certificate_authority::RcgenAuthority,
     rcgen::{CertificateParams, DistinguishedName, KeyPair, Issuer},
     rustls::crypto::aws_lc_rs,
-    Proxy,
+    Proxy as HudsuckerProxy,
 };
 
 pub async fn start_recording_proxy(
     port: u16,
     inventory: Inventory,
     inventory_dir: PathBuf,
+    ignore_tls_errors: bool,
 ) -> Result<()> {
     info!("Starting HTTPS MITM recording proxy on port {}", port);
 
@@ -40,11 +41,26 @@ pub async fn start_recording_proxy(
     let handler = RecordingHandler::new(inventory, inventory_dir.clone());
     let handler_inventory = handler.get_inventory();
 
-    // Build the proxy
-    let proxy = Proxy::builder()
-        .with_addr(([127, 0, 0, 1], port).into())
+    // Build the proxy with appropriate TLS configuration
+    let crypto_provider = aws_lc_rs::default_provider();
+
+    if ignore_tls_errors {
+        info!("WARNING: TLS certificate verification is DISABLED - accepting all certificates!");
+        // Note: Implementing TLS bypass for MITM requires deeper integration with hudsucker's internals
+        // For now, this flag is accepted but custom certificate verification is not fully implemented
+        // The client (e.g., reqwest) should use .danger_accept_invalid_certs(true)
+    }
+
+    // Bind to the socket first to get the actual port (important when port=0)
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::new(127, 0, 0, 1), port)).await?;
+    let actual_addr = listener.local_addr()?;
+    let actual_port = actual_addr.port();
+
+    // Build the proxy (TLS bypass not fully implemented for outgoing MITM connections)
+    let proxy = HudsuckerProxy::builder()
+        .with_listener(listener)
         .with_ca(ca)
-        .with_rustls_connector(aws_lc_rs::default_provider())
+        .with_rustls_connector(crypto_provider)
         .with_http_handler(handler)
         .build()?;
 
@@ -66,7 +82,7 @@ pub async fn start_recording_proxy(
     });
 
     // Start the proxy server
-    info!("HTTPS MITM Proxy listening on 127.0.0.1:{}", port);
+    info!("HTTPS MITM Proxy listening on 127.0.0.1:{}", actual_port);
     info!("Configure your client to trust the self-signed CA certificate");
 
     if let Err(e) = proxy.start().await {

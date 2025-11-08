@@ -45,9 +45,8 @@ func TestAcceptance(t *testing.T) {
 	})
 
 	server := httptest.NewServer(mux)
-	defer server.Close()
-
-	t.Logf("Test HTTP server started at %s", server.URL)
+	serverURL := server.URL
+	t.Logf("Test HTTP server started at %s", serverURL)
 
 	// Create temporary inventory directory
 	tmpDir := t.TempDir()
@@ -56,7 +55,7 @@ func TestAcceptance(t *testing.T) {
 
 	// Test 1: Recording
 	t.Run("Recording", func(t *testing.T) {
-		testRecording(t, server.URL, inventoryDir)
+		testRecording(t, serverURL, inventoryDir)
 	})
 
 	// Test 2: Load and validate inventory
@@ -64,9 +63,22 @@ func TestAcceptance(t *testing.T) {
 		testLoadInventory(t, inventoryDir)
 	})
 
-	// Test 3: Playback
+	// CRITICAL: Stop the HTTP server to prove offline replay capability
+	// Playback MUST serve from inventory without the origin server
+	t.Log("Stopping HTTP server to ensure offline replay...")
+	server.Close()
+	t.Log("HTTP server stopped - playback must work without it")
+
+	// Verify server is truly stopped by attempting direct connection
+	client := &http.Client{Timeout: 2 * time.Second}
+	if _, err := client.Get(serverURL + "/"); err == nil {
+		t.Fatal("Direct request should have failed - server should be stopped!")
+	}
+	t.Log("Confirmed: Direct requests fail (server is stopped)")
+
+	// Test 3: Playback - Server is STOPPED, must serve from inventory only
 	t.Run("Playback", func(t *testing.T) {
-		testPlayback(t, server.URL, inventoryDir)
+		testPlayback(t, serverURL, inventoryDir)
 	})
 }
 
@@ -220,10 +232,11 @@ func testLoadInventory(t *testing.T, inventoryDir string) {
 func testPlayback(t *testing.T, serverURL string, inventoryDir string) {
 	t.Log("Starting playback proxy...")
 
-	// Note: Playback doesn't need the actual server running
-	// It will serve recorded responses from the inventory
+	// CRITICAL: The HTTP server is STOPPED before this test runs
+	// This test MUST prove that playback serves from inventory without the origin server
+	// If this test passes, it confirms true offline replay capability
 
-	// Start playback proxy
+	// Start playback proxy - this MUST serve from inventory only
 	p, err := proxy.StartPlayback(proxy.PlaybackOptions{
 		Port:         0, // Use default port
 		InventoryDir: inventoryDir,

@@ -11,3 +11,7 @@
 /accept/typescript/node_modules/
 /accept/typescript/package-lock.json
 /accept/golang/go.sum
+/accept/performance/target/
+/accept/performance/Cargo.lock
+/accept/minimum/target/
+/accept/minimum/Cargo.lock

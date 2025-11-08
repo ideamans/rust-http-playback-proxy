@@ -9,11 +9,11 @@ import type { ProxyMode, RecordingOptions, PlaybackOptions, Inventory } from './
  */
 export class Proxy {
   public readonly mode: ProxyMode;
-  public readonly port: number;
   public readonly inventoryDir: string;
   public readonly entryUrl?: string;
   public readonly deviceType?: string;
 
+  private _port: number;
   private process?: ChildProcess;
 
   constructor(
@@ -24,10 +24,24 @@ export class Proxy {
     deviceType?: string
   ) {
     this.mode = mode;
-    this.port = port;
+    this._port = port;
     this.inventoryDir = inventoryDir;
     this.entryUrl = entryUrl;
     this.deviceType = deviceType;
+  }
+
+  /**
+   * Get the actual port number (may differ from requested port if 0 was used)
+   */
+  get port(): number {
+    return this._port;
+  }
+
+  /**
+   * Update the port number (used internally when OS assigns a port)
+   */
+  updatePort(port: number): void {
+    this._port = port;
   }
 
   /**
@@ -155,19 +169,58 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
-  // Start the process
+  // Start the process with piped stdout to capture port info
   const proc = spawn(binaryPath, args, {
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'inherit'],
     detached: false,
   });
 
   const proxy = new Proxy('recording', port, inventoryDir, options.entryUrl, deviceType);
   proxy.setProcess(proc);
 
-  // Give the proxy a moment to start
-  await new Promise(resolve => setTimeout(resolve, 500));
+  // Capture stdout to extract actual port number when using port 0
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(proxy);
+      }
+    }, 2000);
 
-  return proxy;
+    proc.stdout?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      // Look for "Recording proxy listening on 127.0.0.1:XXXXX" or "Playback proxy listening on 127.0.0.1:XXXXX"
+      const match = output.match(/proxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/i);
+      if (match && match[1]) {
+        const actualPort = parseInt(match[1], 10);
+        proxy.updatePort(actualPort);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          resolve(proxy);
+        }
+      }
+      // Forward output to console
+      process.stdout.write(data);
+    });
+
+    proc.on('error', (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(err);
+      }
+    });
+
+    proc.on('exit', (code) => {
+      if (!resolved && code !== 0) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(new Error(`Proxy exited with code ${code}`));
+      }
+    });
+  });
 }
 
 /**
@@ -199,19 +252,58 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
-  // Start the process
+  // Start the process with piped stdout to capture port info
   const proc = spawn(binaryPath, args, {
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'inherit'],
     detached: false,
   });
 
   const proxy = new Proxy('playback', port, inventoryDir);
   proxy.setProcess(proc);
 
-  // Give the proxy a moment to start
-  await new Promise(resolve => setTimeout(resolve, 500));
+  // Capture stdout to extract actual port number when using port 0
+  return new Promise((resolve, reject) => {
+    let resolved = false;
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve(proxy);
+      }
+    }, 2000);
 
-  return proxy;
+    proc.stdout?.on('data', (data: Buffer) => {
+      const output = data.toString();
+      // Look for "Playback proxy listening on 127.0.0.1:XXXXX"
+      const match = output.match(/proxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/i);
+      if (match && match[1]) {
+        const actualPort = parseInt(match[1], 10);
+        proxy.updatePort(actualPort);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          resolve(proxy);
+        }
+      }
+      // Forward output to console
+      process.stdout.write(data);
+    });
+
+    proc.on('error', (err) => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(err);
+      }
+    });
+
+    proc.on('exit', (code) => {
+      if (!resolved && code !== 0) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(new Error(`Proxy exited with code ${code}`));
+      }
+    });
+  });
 }
 
 /**

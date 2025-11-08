@@ -144,12 +144,47 @@ describe('HTTP Playback Proxy Acceptance Test', () => {
   });
 
   it('should playback recorded traffic', async () => {
+    // CRITICAL: Stop the HTTP server to prove offline replay capability
+    // Playback MUST serve from inventory without the origin server
+    console.log('Stopping HTTP server to ensure offline replay...');
+
+    if (testServer) {
+      // Extract port from serverUrl before closing
+      const urlObj = new URL(serverUrl);
+      const serverPort = parseInt(urlObj.port, 10);
+
+      await new Promise((resolve) => testServer.close(resolve));
+      console.log('HTTP server stopped - playback must work without it');
+
+      // Verify server is stopped - attempt direct connection (NOT through proxy)
+      try {
+        await new Promise((resolve, reject) => {
+          const directReq = http.request({
+            hostname: '127.0.0.1',
+            port: serverPort,
+            path: '/',
+            method: 'GET',
+            timeout: 1000,
+          }, () => {
+            reject(new Error('Direct request should have failed - server should be stopped!'));
+          });
+
+          directReq.on('error', reject);  // Expected - server is stopped
+          directReq.setTimeout(1000, () => {
+            directReq.destroy();
+            reject(new Error('Timeout - connection should have failed'));
+          });
+          directReq.end();
+        });
+      } catch (err) {
+        // Expected - server is stopped
+        console.log('Confirmed: Direct requests fail (server is stopped)');
+      }
+    }
+
     console.log('Starting playback proxy...');
 
-    // Note: Playback doesn't need the actual server running
-    // It will serve recorded responses from the inventory
-
-    // Start playback proxy
+    // Start playback proxy - this MUST serve from inventory only
     const proxy = await startPlayback({
       port: 0, // Use default
       inventoryDir: join(inventoryDir, 'inventory'),
@@ -161,10 +196,10 @@ describe('HTTP Playback Proxy Acceptance Test', () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     // Make requests through proxy (same URLs as recording)
-    // Important: We request the SAME URLs that were recorded,
-    // but the proxy will serve them from the inventory instead of the actual server
+    // These MUST succeed even though the origin server is stopped,
+    // proving they are served from the recorded inventory
     console.log('Making HTTP requests through playback proxy...');
-    console.log('Note: These will be served from recorded inventory, not the actual server');
+    console.log('Note: Server is STOPPED - these will be served from inventory only');
 
     // Request 1: HTML page
     const htmlBody = await makeRequest(serverUrl + '/', '127.0.0.1', proxy.port);

@@ -22,11 +22,12 @@ async fn main() -> anyhow::Result<()> {
             port,
             device,
             inventory,
+            ignore_tls_errors,
         } => {
-            recording::run_recording_mode(entry_url, port, device, inventory).await?;
+            recording::run_recording_mode(entry_url, port, device, inventory, ignore_tls_errors).await?;
         }
-        Commands::Playback { port, inventory } => {
-            playback::run_playback_mode(port, inventory).await?;
+        Commands::Playback { port, inventory, ignore_tls_errors } => {
+            playback::run_playback_mode(port, inventory, ignore_tls_errors).await?;
         }
     }
 
