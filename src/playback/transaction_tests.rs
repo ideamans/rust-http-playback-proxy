@@ -301,6 +301,7 @@ mod tests {
         // Verify Content-Type header uses original charset
         let headers = transaction.raw_headers.unwrap();
         let content_type = headers.get("content-type").unwrap();
-        assert!(content_type.contains("Shift_JIS"));
+        let content_type_str = content_type.first();
+        assert!(content_type_str.contains("Shift_JIS"));
     }
 }

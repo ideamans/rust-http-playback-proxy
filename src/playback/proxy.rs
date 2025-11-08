@@ -82,19 +82,23 @@ async fn handle_playback_request(
 
     info!("Handling playback request: {} {} (reconstructed URL: {})", method, uri, url);
 
-    // Find matching transaction by method and path (ignore protocol/host/port differences)
-    // This allows matching regardless of HTTP vs HTTPS or different ports
+    // Extract request components for matching
     let request_path = uri.path();
     let request_query = uri.query();
+    let request_host = headers.get("host")
+        .and_then(|h| h.to_str().ok())
+        .or_else(|| uri.authority().map(|a| a.as_str()));
 
-    info!("Looking for transaction: method={}, path={}, query={:?}", method, request_path, request_query);
+    info!("Looking for transaction: method={}, host={:?}, path={}, query={:?}",
+          method, request_host, request_path, request_query);
     info!("Total transactions available: {}", transactions.len());
 
     // Debug: List all available transactions
     for (idx, t) in transactions.iter().enumerate() {
         if let Ok(transaction_uri) = t.url.parse::<hyper::Uri>() {
-            info!("  Transaction[{}]: method={}, url={}, path={}, query={:?}",
-                idx, t.method, t.url, transaction_uri.path(), transaction_uri.query());
+            let t_host = transaction_uri.authority().map(|a| a.as_str());
+            info!("  Transaction[{}]: method={}, host={:?}, url={}, path={}, query={:?}",
+                idx, t.method, t_host, t.url, transaction_uri.path(), transaction_uri.query());
         }
     }
 
@@ -106,13 +110,22 @@ async fn handle_playback_request(
                 return false;
             }
 
-            // Parse transaction URL to extract path and query
+            // Parse transaction URL to extract components
             if let Ok(transaction_uri) = t.url.parse::<hyper::Uri>() {
                 let t_path = transaction_uri.path();
                 let t_query = transaction_uri.query();
+                let t_host = transaction_uri.authority().map(|a| a.as_str());
+
+                // Match host (if available in both request and transaction)
+                // This prevents cross-origin mismatches
+                let host_matches = match (request_host, t_host) {
+                    (Some(req_h), Some(t_h)) => req_h == t_h,
+                    // If either is missing, fall back to path-only matching for backward compatibility
+                    _ => true,
+                };
 
                 // Match path and query
-                let matches = t_path == request_path && t_query == request_query;
+                let matches = host_matches && t_path == request_path && t_query == request_query;
                 if matches {
                     info!("Found matching transaction: {}", t.url);
                 }
@@ -214,10 +227,13 @@ async fn serve_transaction(
                 continue; // Skip hop-by-hop headers
             }
 
-            // Validate header name and value before adding
+            // Validate header name and add all values (handles both Single and Multiple)
             if let Ok(header_name) = hyper::header::HeaderName::from_bytes(key.as_bytes()) {
-                if let Ok(header_value) = hyper::header::HeaderValue::from_str(value) {
-                    response_builder = response_builder.header(header_name, header_value);
+                // Add all values for this header (supports multiple values like Set-Cookie)
+                for val_str in value.as_vec() {
+                    if let Ok(header_value) = hyper::header::HeaderValue::from_str(val_str) {
+                        response_builder = response_builder.header(header_name.clone(), header_value);
+                    }
                 }
             }
         }

@@ -3,7 +3,46 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use clap::ValueEnum;
 
-pub type HttpHeaders = HashMap<String, String>;
+/// HTTP header value that can be either a single string or multiple strings (for headers like Set-Cookie)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum HeaderValue {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl HeaderValue {
+    /// Create a single-value header
+    #[allow(dead_code)]
+    pub fn single(value: String) -> Self {
+        HeaderValue::Single(value)
+    }
+
+    /// Create a multi-value header
+    #[allow(dead_code)]
+    pub fn multiple(values: Vec<String>) -> Self {
+        HeaderValue::Multiple(values)
+    }
+
+    /// Get the first value (useful for single-value headers)
+    #[allow(dead_code)]
+    pub fn first(&self) -> &str {
+        match self {
+            HeaderValue::Single(s) => s,
+            HeaderValue::Multiple(v) => v.first().map(|s| s.as_str()).unwrap_or(""),
+        }
+    }
+
+    /// Get all values as a vector
+    pub fn as_vec(&self) -> Vec<&str> {
+        match self {
+            HeaderValue::Single(s) => vec![s.as_str()],
+            HeaderValue::Multiple(v) => v.iter().map(|s| s.as_str()).collect(),
+        }
+    }
+}
+
+pub type HttpHeaders = HashMap<String, HeaderValue>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]

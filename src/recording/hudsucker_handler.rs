@@ -8,7 +8,8 @@ use std::time::Instant;
 use std::future::Future;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
 
 use crate::types::{Inventory, Resource};
 use super::processor::RequestProcessor;
@@ -28,7 +29,9 @@ pub struct RecordingHandler {
     shared_inventory: Arc<Mutex<Inventory>>,
     processor: Arc<RequestProcessor<RealFileSystem, RealTimeProvider>>,
     start_time: Arc<Instant>,
-    request_infos: Arc<Mutex<VecDeque<(String, RequestInfo)>>>,
+    // Connection-based FIFO queues: each client address has its own request queue
+    // This handles HTTP/1.1 pipelining and ensures correct request-response pairing per connection
+    request_infos: Arc<Mutex<HashMap<SocketAddr, VecDeque<RequestInfo>>>>,
     request_counter: Arc<Mutex<u64>>,
 }
 
@@ -44,7 +47,7 @@ impl RecordingHandler {
             shared_inventory: Arc::new(Mutex::new(inventory)),
             processor,
             start_time: Arc::new(Instant::now()),
-            request_infos: Arc::new(Mutex::new(VecDeque::new())),
+            request_infos: Arc::new(Mutex::new(HashMap::new())),
             request_counter: Arc::new(Mutex::new(0)),
         }
     }
@@ -57,12 +60,13 @@ impl RecordingHandler {
 impl HttpHandler for RecordingHandler {
     fn handle_request(
         &mut self,
-        _ctx: &HttpContext,
+        ctx: &HttpContext,
         req: Request<Body>,
     ) -> impl Future<Output = RequestOrResponse> + Send {
         let method = req.method().clone();
         let uri = req.uri().clone();
         let headers = req.headers().clone();
+        let client_addr = ctx.client_addr;
 
         let start_time = Arc::clone(&self.start_time);
         let request_infos = Arc::clone(&self.request_infos);
@@ -110,29 +114,30 @@ impl HttpHandler for RecordingHandler {
             };
 
             // Store request information for correlation with response
-            // Use VecDeque to maintain FIFO order
+            // Use connection-based FIFO: push to the back of this client's queue
             {
                 let mut infos = request_infos.lock().await;
-                infos.push_back((request_id.to_string(), RequestInfo {
-                    method: method.to_string(),
-                    url: url.clone(),
-                    request_start,
-                    elapsed_since_start,
-                }));
+                infos.entry(client_addr)
+                    .or_insert_with(VecDeque::new)
+                    .push_back(RequestInfo {
+                        method: method.to_string(),
+                        url: url.clone(),
+                        request_start,
+                        elapsed_since_start,
+                    });
             }
 
-            // DON'T modify request - just pass it through unchanged
-            // Pass the request through
             RequestOrResponse::Request(req)
         }
     }
 
     fn handle_response(
         &mut self,
-        _ctx: &HttpContext,
+        ctx: &HttpContext,
         res: Response<Body>,
     ) -> impl Future<Output = Response<Body>> + Send {
         let status = res.status();
+        let client_addr = ctx.client_addr;
 
         let start_time = Arc::clone(&self.start_time);
         let request_infos = Arc::clone(&self.request_infos);
@@ -158,11 +163,15 @@ impl HttpHandler for RecordingHandler {
                 }
             };
 
-            // Find matching request info (FIFO - get the oldest/first request)
+            // Find matching request info using connection-based FIFO
+            // Pop from the front of this client's queue (oldest request first)
             let request_info = {
                 let mut infos = request_infos.lock().await;
-                // Pop the first entry (oldest request) from the queue
-                infos.pop_front().map(|(_, info)| info)
+                if let Some(queue) = infos.get_mut(&client_addr) {
+                    queue.pop_front()
+                } else {
+                    None
+                }
             };
 
             let (method_str, url, ttfb_ms, download_end_ms) = if let Some(info) = request_info {
@@ -180,8 +189,8 @@ impl HttpHandler for RecordingHandler {
 
                 (info.method, info.url, ttfb_ms, download_end_ms)
             } else {
-                // Fallback
-                error!("No matching request info found for response");
+                // Fallback - this should rarely happen with connection-based FIFO
+                error!("No matching request info found for client: {}", client_addr);
                 let elapsed = ttfb_instant.duration_since(*start_time).as_millis() as u64;
                 let download_end = Instant::now();
                 let download_end_elapsed = download_end.duration_since(*start_time).as_millis() as u64;
@@ -195,10 +204,26 @@ impl HttpHandler for RecordingHandler {
             resource.download_end_ms = Some(download_end_ms);
 
             // Store response headers
+            // Multiple headers with the same name (like Set-Cookie) are collected into arrays
             let mut resource_headers = std::collections::HashMap::new();
             for (name, value) in headers.iter() {
                 if let Ok(value_str) = value.to_str() {
-                    resource_headers.insert(name.to_string(), value_str.to_string());
+                    let header_name = name.to_string();
+                    let value_string = value_str.to_string();
+
+                    resource_headers.entry(header_name)
+                        .and_modify(|existing| {
+                            // If header already exists, convert to Multiple or append to existing Multiple
+                            match existing {
+                                crate::types::HeaderValue::Single(first) => {
+                                    *existing = crate::types::HeaderValue::Multiple(vec![first.clone(), value_string.clone()]);
+                                }
+                                crate::types::HeaderValue::Multiple(values) => {
+                                    values.push(value_string.clone());
+                                }
+                            }
+                        })
+                        .or_insert_with(|| crate::types::HeaderValue::Single(value_string));
                 }
             }
             resource.raw_headers = Some(resource_headers);

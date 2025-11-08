@@ -25,9 +25,6 @@ pub enum Commands {
 
         #[arg(short, long, default_value = "./inventory", help = "Inventory directory")]
         inventory: PathBuf,
-
-        #[arg(long, help = "Ignore TLS certificate errors")]
-        ignore_tls_errors: bool,
     },
 
     #[command(about = "Playback recorded HTTP traffic")]
@@ -37,8 +34,5 @@ pub enum Commands {
 
         #[arg(short, long, default_value = "./inventory", help = "Inventory directory")]
         inventory: PathBuf,
-
-        #[arg(long, help = "Ignore TLS certificate errors")]
-        ignore_tls_errors: bool,
     },
 }

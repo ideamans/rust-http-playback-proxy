@@ -16,7 +16,6 @@ pub async fn run_recording_mode(
     port: Option<u16>,
     device: DeviceType,
     inventory_dir: PathBuf,
-    ignore_tls_errors: bool,
 ) -> Result<()> {
     let port = get_port_or_default(port)?;
 
@@ -32,5 +31,5 @@ pub async fn run_recording_mode(
     inventory.entry_url = entry_url.clone();
     inventory.device_type = Some(device);
 
-    proxy::start_recording_proxy(port, inventory, inventory_dir, ignore_tls_errors).await
+    proxy::start_recording_proxy(port, inventory, inventory_dir).await
 }
