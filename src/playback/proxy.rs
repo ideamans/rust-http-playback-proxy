@@ -246,57 +246,56 @@ async fn serve_transaction(
 
     // Create streaming body with timing control
     // Chunks have target_time as relative time from TTFB completion (0-based)
+    // After all chunks are sent, wait until target_close_time before closing the connection
     let chunks = transaction.chunks.clone();
     let target_close_time = transaction.target_close_time;
+    let total_chunks = chunks.len();
 
     let stream = stream::unfold(
-        (chunks.into_iter().peekable(), ttfb_end_instant, target_close_time, false, 0usize),
-        |(mut iter, ttfb_instant, close_time, is_done, chunk_idx)| async move {
-            if is_done {
-                info!("Stream finished, all chunks sent");
+        (chunks.into_iter().peekable(), ttfb_end_instant, target_close_time, total_chunks, 0usize, false),
+        |(mut iter, ttfb_instant, close_time, total, chunk_idx, sent_all)| async move {
+            if sent_all {
+                // All chunks have been sent, now wait until target_close_time before closing
+                let elapsed = ttfb_instant.elapsed().as_millis() as u64;
+                if close_time > elapsed {
+                    let wait_time = close_time - elapsed;
+                    info!("All {} chunks sent, waiting {}ms until target_close_time before closing connection", total, wait_time);
+                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                } else {
+                    let behind_ms = elapsed - close_time;
+                    info!("All {} chunks sent, already {}ms past target_close_time, closing immediately", total, behind_ms);
+                }
+                // Stream ends here - connection will close
                 return None;
             }
 
             if let Some(chunk) = iter.next() {
-                // Check if this is the last chunk by peeking ahead
-                let is_last_chunk = iter.peek().is_none();
-
                 // Check current elapsed time since TTFB completion
                 let elapsed = ttfb_instant.elapsed().as_millis() as u64;
 
-                if is_last_chunk {
-                    // For the last chunk, wait until target_close_time before sending it
-                    // This ensures the client measures the full transfer duration
-                    if close_time > elapsed {
-                        let wait_time = close_time - elapsed;
-                        info!("Chunk[{}] (LAST): Waiting {}ms until target_close_time before sending", chunk_idx, wait_time);
-                        tokio::time::sleep(Duration::from_millis(wait_time)).await;
-                    } else {
-                        let behind_ms = elapsed - close_time;
-                        info!("Chunk[{}] (LAST): Behind target_close_time by {}ms, sending immediately", chunk_idx, behind_ms);
-                    }
-                } else {
-                    // For non-last chunks, use normal timing
-                    if chunk.target_time > elapsed {
-                        let wait_time = chunk.target_time - elapsed;
-                        info!("Chunk[{}]: Waiting {}ms before sending (target: {}ms, elapsed: {}ms)",
-                               chunk_idx, wait_time, chunk.target_time, elapsed);
-                        tokio::time::sleep(Duration::from_millis(wait_time)).await;
-                    } else if chunk.target_time > 0 && elapsed > chunk.target_time {
-                        // We're behind schedule - log it but send immediately
-                        let behind_ms = elapsed - chunk.target_time;
-                        info!("Chunk[{}]: Behind schedule by {}ms, sending immediately (target: {}ms, elapsed: {}ms)",
-                               chunk_idx, behind_ms, chunk.target_time, elapsed);
-                    }
+                // Wait until target_time for this chunk
+                if chunk.target_time > elapsed {
+                    let wait_time = chunk.target_time - elapsed;
+                    info!("Chunk[{}]: Waiting {}ms before sending (target: {}ms, elapsed: {}ms)",
+                           chunk_idx, wait_time, chunk.target_time, elapsed);
+                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                } else if chunk.target_time > 0 && elapsed > chunk.target_time {
+                    // We're behind schedule - log it but send immediately
+                    let behind_ms = elapsed - chunk.target_time;
+                    info!("Chunk[{}]: Behind schedule by {}ms, sending immediately (target: {}ms, elapsed: {}ms)",
+                           chunk_idx, behind_ms, chunk.target_time, elapsed);
                 }
 
                 // Send chunk
                 info!("Chunk[{}]: Sending {} bytes", chunk_idx, chunk.chunk.len());
                 let frame = Frame::data(bytes::Bytes::from(chunk.chunk));
-                Some((Ok::<_, std::io::Error>(frame), (iter, ttfb_instant, close_time, false, chunk_idx + 1)))
+
+                // Check if this was the last chunk
+                let is_last = iter.peek().is_none();
+
+                Some((Ok::<_, std::io::Error>(frame), (iter, ttfb_instant, close_time, total, chunk_idx + 1, is_last)))
             } else {
-                // All chunks sent, stream ends
-                info!("All {} chunks sent, closing stream", chunk_idx);
+                // Shouldn't reach here but handle gracefully
                 None
             }
         },
