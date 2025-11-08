@@ -77,18 +77,26 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
     let mut headers = resource.raw_headers.clone().unwrap_or_default();
 
     // Update content-length
-    headers.insert("content-length".to_string(), final_content.len().to_string());
+    headers.insert(
+        "content-length".to_string(),
+        crate::types::HeaderValue::Single(final_content.len().to_string())
+    );
 
     // Update charset - use original_charset if available, otherwise fall back to content_type_charset
     if let Some(mime_type) = &resource.content_type_mime {
         let charset_to_use = resource.original_charset.as_ref()
             .or(resource.content_type_charset.as_ref());
 
-        if let Some(charset) = charset_to_use {
-            headers.insert("content-type".to_string(), format!("{}; charset={}", mime_type, charset));
+        let content_type_value = if let Some(charset) = charset_to_use {
+            format!("{}; charset={}", mime_type, charset)
         } else {
-            headers.insert("content-type".to_string(), mime_type.clone());
-        }
+            mime_type.clone()
+        };
+
+        headers.insert(
+            "content-type".to_string(),
+            crate::types::HeaderValue::Single(content_type_value)
+        );
     }
 
     Ok(Some(Transaction {

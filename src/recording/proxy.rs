@@ -19,7 +19,6 @@ pub async fn start_recording_proxy(
     port: u16,
     inventory: Inventory,
     inventory_dir: PathBuf,
-    ignore_tls_errors: bool,
 ) -> Result<()> {
     info!("Starting HTTPS MITM recording proxy on port {}", port);
 
@@ -41,22 +40,15 @@ pub async fn start_recording_proxy(
     let handler = RecordingHandler::new(inventory, inventory_dir.clone());
     let handler_inventory = handler.get_inventory();
 
-    // Build the proxy with appropriate TLS configuration
+    // Build the proxy with standard TLS configuration
     let crypto_provider = aws_lc_rs::default_provider();
-
-    if ignore_tls_errors {
-        info!("WARNING: TLS certificate verification is DISABLED - accepting all certificates!");
-        // Note: Implementing TLS bypass for MITM requires deeper integration with hudsucker's internals
-        // For now, this flag is accepted but custom certificate verification is not fully implemented
-        // The client (e.g., reqwest) should use .danger_accept_invalid_certs(true)
-    }
 
     // Bind to the socket first to get the actual port (important when port=0)
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::new(127, 0, 0, 1), port)).await?;
     let actual_addr = listener.local_addr()?;
     let actual_port = actual_addr.port();
 
-    // Build the proxy (TLS bypass not fully implemented for outgoing MITM connections)
+    // Build the proxy
     let proxy = HudsuckerProxy::builder()
         .with_listener(listener)
         .with_ca(ca)

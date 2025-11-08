@@ -439,9 +439,28 @@ async fn test_recording_and_playback_integration() {
     
     // Step 6: Verify inventory and contents were created
     println!("Verifying recorded files...");
+    println!("Inventory directory: {:?}", inventory_dir);
+
+    // List all files in inventory directory
+    if let Ok(entries) = std::fs::read_dir(&inventory_dir) {
+        println!("Contents of inventory directory:");
+        for entry in entries {
+            if let Ok(entry) = entry {
+                println!("  - {:?}", entry.path());
+            }
+        }
+    } else {
+        println!("Could not read inventory directory");
+    }
+
     let inventory_file = inventory_dir.join("inventory.json");
     assert!(inventory_file.exists(), "inventory.json should exist");
-    
+
+    // Read inventory to see what's in it
+    if let Ok(inv_content) = std::fs::read_to_string(&inventory_file) {
+        println!("Inventory.json contents:\n{}", inv_content);
+    }
+
     let contents_dir = inventory_dir.join("contents");
     assert!(contents_dir.exists(), "contents directory should exist");
     

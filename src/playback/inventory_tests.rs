@@ -168,8 +168,8 @@ mod tests {
         
         use std::collections::HashMap;
         let mut headers = HashMap::new();
-        headers.insert("content-type".to_string(), "application/json".to_string());
-        headers.insert("x-rate-limit".to_string(), "100".to_string());
+        headers.insert("content-type".to_string(), crate::types::HeaderValue::Single("application/json".to_string()));
+        headers.insert("x-rate-limit".to_string(), crate::types::HeaderValue::Single("100".to_string()));
         resource.raw_headers = Some(headers);
         
         resource.content_encoding = Some(crate::types::ContentEncodingType::Gzip);
