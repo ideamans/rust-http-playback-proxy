@@ -197,6 +197,8 @@ async fn serve_transaction(
         for (key, value) in headers {
             // Skip headers that Hyper manages automatically to avoid UnexpectedHeader error
             let key_lower = key.to_lowercase();
+            // Extended list of hop-by-hop headers per RFC 2616 Section 13.5.1
+            // and additional headers that Hyper manages
             if key_lower == "transfer-encoding"
                 || key_lower == "content-length"
                 || key_lower == "connection"
@@ -207,10 +209,17 @@ async fn serve_transaction(
                 || key_lower == "proxy-connection"
                 || key_lower == "proxy-authorization"
                 || key_lower == "proxy-authenticate"
+                || key_lower == "host"  // Host header can cause issues in responses
             {
                 continue; // Skip hop-by-hop headers
             }
-            response_builder = response_builder.header(key, value);
+
+            // Validate header name and value before adding
+            if let Ok(header_name) = hyper::header::HeaderName::from_bytes(key.as_bytes()) {
+                if let Ok(header_value) = hyper::header::HeaderValue::from_str(value) {
+                    response_builder = response_builder.header(header_name, header_value);
+                }
+            }
         }
     }
 

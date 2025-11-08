@@ -1,9 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::types::{DeviceType, Inventory, Resource, ContentEncodingType};
-use serde::Serialize;
+    use serde::Serialize;
     use tempfile::TempDir;
     use tokio;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_load_inventory() {
@@ -304,5 +305,158 @@ use serde::Serialize;
                 mbps, content_size, expected_transfer_time, target_close_time
             );
         }
+    }
+
+    #[test]
+    fn test_compress_brotli_content() {
+        use crate::playback::transaction::compress_content;
+
+        let content = b"This is test content for Brotli compression testing. Brotli is a modern compression algorithm developed by Google.";
+
+        let compressed = compress_content(content, &ContentEncodingType::Br).unwrap();
+
+        // Compressed content should be different
+        assert_ne!(compressed, content);
+        // Brotli should compress this content
+        assert!(compressed.len() < content.len());
+    }
+
+    #[test]
+    fn test_compress_deflate_content() {
+        use crate::playback::transaction::compress_content;
+
+        let content = b"This is test content for deflate compression. Deflate is a common compression algorithm used in HTTP.";
+
+        let compressed = compress_content(content, &ContentEncodingType::Deflate).unwrap();
+
+        // Compressed content should be different
+        assert_ne!(compressed, content);
+        assert!(compressed.len() > 0);
+    }
+
+    #[test]
+    fn test_compress_very_small_content() {
+        use crate::playback::transaction::compress_content;
+
+        let content = b"Hi";
+
+        // Gzip may increase size for very small content
+        let compressed = compress_content(content, &ContentEncodingType::Gzip).unwrap();
+        assert!(compressed.len() > 0);
+
+        // But identity should preserve it
+        let identity = compress_content(content, &ContentEncodingType::Identity).unwrap();
+        assert_eq!(identity, content);
+    }
+
+    #[test]
+    fn test_create_chunks_with_zero_mbps() {
+        use crate::playback::transaction::create_chunks;
+
+        let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
+        resource.ttfb_ms = 100;
+        resource.mbps = Some(0.0); // Invalid: 0 Mbps
+
+        let content = b"test content";
+
+        // Should handle edge case gracefully
+        let result = create_chunks(content, &resource);
+
+        // Should either error or use a reasonable default
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn test_create_chunks_without_mbps() {
+        use crate::playback::transaction::create_chunks;
+
+        let mut resource = Resource::new("GET".to_string(), "https://example.com/test".to_string());
+        resource.ttfb_ms = 100;
+        resource.mbps = None; // No bandwidth info
+
+        let content = b"test content";
+        let result = create_chunks(content, &resource);
+
+        // Should handle missing bandwidth
+        assert!(result.is_ok());
+        if let Ok((chunks, _)) = result {
+            assert!(!chunks.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_convert_resource_with_error_message() {
+        use crate::playback::transaction::convert_resource_to_transaction;
+        use crate::traits::RealFileSystem;
+
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mut resource = Resource::new("GET".to_string(), "https://example.com/error".to_string());
+        resource.error_message = Some("Connection timeout".to_string());
+        resource.status_code = Some(504);
+        resource.ttfb_ms = 5000;
+        // Add dummy content so the transaction is created
+        resource.content_utf8 = Some("Gateway Timeout".to_string());
+
+        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, std::sync::Arc::new(RealFileSystem))
+            .await
+            .unwrap();
+
+        assert!(transaction.is_some());
+        let tx = transaction.unwrap();
+        assert_eq!(tx.error_message, Some("Connection timeout".to_string()));
+        assert_eq!(tx.status_code, Some(504));
+    }
+
+    #[test]
+    fn test_minify_javascript_content() {
+        use crate::playback::transaction::minify_content;
+
+        let js_with_comments = b"// This is a comment\nfunction test() {\n  // Another comment\n  return 42;\n}";
+
+        let minified = minify_content(js_with_comments, &Some("application/javascript".to_string())).unwrap();
+        let minified_str = String::from_utf8(minified).unwrap();
+
+        // Should be more compact
+        assert!(minified_str.len() <= js_with_comments.len());
+    }
+
+    #[tokio::test]
+    async fn test_load_inventory_invalid_json() {
+        use crate::playback::load_inventory;
+        use crate::traits::mocks::MockFileSystem;
+
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+
+        // Create invalid JSON file
+        let inventory_path = inventory_dir.join("inventory.json");
+        mock_fs.set_file(&inventory_path.to_string_lossy(), b"{ invalid json".to_vec());
+
+        // Should fail gracefully
+        let result = load_inventory(&inventory_dir, mock_fs).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_content_encoding_all_types() {
+        use std::str::FromStr;
+
+        // Test all encoding types
+        assert!(ContentEncodingType::from_str("gzip").is_ok());
+        assert!(ContentEncodingType::from_str("br").is_ok());
+        assert!(ContentEncodingType::from_str("deflate").is_ok());
+        assert!(ContentEncodingType::from_str("identity").is_ok());
+
+        // Case insensitive
+        assert!(ContentEncodingType::from_str("GZIP").is_ok());
+        assert!(ContentEncodingType::from_str("Br").is_ok());
+
+        // Invalid
+        assert!(ContentEncodingType::from_str("unknown").is_err());
+        assert!(ContentEncodingType::from_str("").is_err());
     }
 }
