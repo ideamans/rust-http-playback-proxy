@@ -372,4 +372,3 @@ async fn serve_transaction(
 
     Ok(response)
 }
-
