@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::recording::processor::RequestProcessor;
-    use crate::traits::mocks::{MockFileSystem, MockTimeProvider};
+    use crate::traits::{FileSystem, mocks::{MockFileSystem, MockTimeProvider}};
     use crate::types::{Resource, ContentEncodingType};
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -163,43 +163,37 @@ mod tests {
         assert!(result.len() >= minified_css.len());
     }
 
-    #[test]
-    fn test_remove_charset_declarations_html() {
+    #[tokio::test]
+    async fn test_original_charset_preservation() {
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
 
         let mock_fs = Arc::new(MockFileSystem::new());
         let mock_time = Arc::new(MockTimeProvider::new(1000));
 
-        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+        let processor = RequestProcessor::new(inventory_dir.clone(), mock_fs.clone(), mock_time);
 
-        // Test <meta charset="...">
-        let html_with_charset = r#"<html><head><meta charset="shift_jis"><title>Test</title></head><body>Content</body></html>"#;
-        let result = processor.remove_charset_declarations(html_with_charset, &Some("text/html".to_string()));
-        assert!(result.contains(r#"<meta charset="UTF-8">"#));
-        assert!(!result.contains("shift_jis"));
+        // Test with Shift_JIS charset
+        let mut resource = Resource::new("GET".to_string(), "https://example.com/index.html".to_string());
+        resource.content_type_mime = Some("text/html".to_string());
+        resource.content_type_charset = Some("Shift_JIS".to_string());
 
-        // Test <meta http-equiv="Content-Type" content="...; charset=...">
-        let html_with_http_equiv = r#"<html><head><meta http-equiv="Content-Type" content="text/html; charset=euc-jp"><title>Test</title></head></html>"#;
-        let result = processor.remove_charset_declarations(html_with_http_equiv, &Some("text/html".to_string()));
-        assert!(result.contains(r#"charset=UTF-8"#));
-        assert!(!result.contains("euc-jp"));
+        // Create a simple HTML with Shift_JIS charset in meta
+        let html = r#"<html><head><meta charset="Shift_JIS"><title>テスト</title></head><body>内容</body></html>"#;
+        let body = html.as_bytes();
+
+        processor.process_text_resource(&mut resource, body).await.unwrap();
+
+        // Verify original charset is preserved
+        assert_eq!(resource.original_charset, Some("Shift_JIS".to_string()));
+
+        // Verify charset was converted to UTF-8 for internal storage
+        assert_eq!(resource.content_type_charset, Some("UTF-8".to_string()));
+
+        // Verify meta tag was NOT modified (kept original Shift_JIS)
+        let file_path = inventory_dir.join(resource.content_file_path.as_ref().unwrap());
+        let saved_content = mock_fs.read_to_string(&file_path).await.unwrap();
+        assert!(saved_content.contains(r#"<meta charset="Shift_JIS">"#) || saved_content.contains(r#"<meta charset="shift_jis">"#));
     }
 
-    #[test]
-    fn test_remove_charset_declarations_css() {
-        let temp_dir = TempDir::new().unwrap();
-        let inventory_dir = temp_dir.path().to_path_buf();
-
-        let mock_fs = Arc::new(MockFileSystem::new());
-        let mock_time = Arc::new(MockTimeProvider::new(1000));
-
-        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
-
-        // Test @charset declaration removal
-        let css_with_charset = r#"@charset "UTF-8"; body { color: red; }"#;
-        let result = processor.remove_charset_declarations(css_with_charset, &Some("text/css".to_string()));
-        assert!(!result.contains("@charset"));
-        assert!(result.contains("body"));
-    }
 }
