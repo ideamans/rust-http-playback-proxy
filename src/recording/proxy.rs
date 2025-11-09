@@ -67,10 +67,10 @@ pub async fn start_recording_proxy(
     let inventory_dir_clone = inventory_dir.clone();
     let handler_inventory_clone = handler_inventory.clone();
     tokio::spawn(async move {
-        tokio::signal::ctrl_c()
+        super::signal_handler::wait_for_shutdown_signal()
             .await
-            .expect("Failed to listen for Ctrl+C");
-        info!("Received Ctrl+C, saving inventory...");
+            .expect("Failed to listen for shutdown signal");
+        info!("Received shutdown signal, saving inventory...");
 
         let inventory = handler_inventory_clone.lock().await;
         if let Err(e) = save_inventory(&inventory, &inventory_dir_clone).await {

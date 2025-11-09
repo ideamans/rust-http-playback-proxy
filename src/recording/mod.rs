@@ -6,6 +6,7 @@ use std::path::PathBuf;
 mod hudsucker_handler;
 mod processor;
 pub mod proxy;
+mod signal_handler;
 mod tests;
 
 #[cfg(test)]

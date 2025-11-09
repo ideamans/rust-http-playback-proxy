@@ -209,11 +209,11 @@ func (p *Proxy) Stop() error {
 	select {
 	case err := <-done:
 		if err != nil {
-			// Exit code 130 is expected for SIGINT, and some systems also return -1
+			// Exit code 130 is expected for SIGINT, -1 for signals, 0 for success
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode := exitErr.ExitCode()
-				if exitCode == 130 || exitCode == -1 {
-					// SIGINT is a normal way to stop the proxy
+				if exitCode == 0 || exitCode == 130 || exitCode == -1 {
+					// Normal exit codes for graceful shutdown
 					return nil
 				}
 			}
@@ -223,6 +223,7 @@ func (p *Proxy) Stop() error {
 			}
 			return fmt.Errorf("proxy exited with error: %w", err)
 		}
+		// Exit code 0 - success
 		return nil
 	case <-time.After(10 * time.Second):
 		// Force kill if graceful shutdown takes too long
