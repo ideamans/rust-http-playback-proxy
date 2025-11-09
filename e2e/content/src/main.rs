@@ -806,10 +806,6 @@ async fn main() -> Result<()> {
     let _ = recording_proxy.kill();
     let _ = recording_proxy.wait();
 
-    // Additional wait for filesystem sync (especially important in CI)
-    info!("Waiting for filesystem sync...");
-    sleep(Duration::from_secs(2)).await;
-
     // === Phase 2: Verification ===
     info!("\n--- Phase 2: Verification ---");
 
