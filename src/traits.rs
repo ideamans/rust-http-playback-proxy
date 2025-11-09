@@ -194,7 +194,8 @@ pub mod mocks {
         }
 
         pub fn set_file(&self, path: &str, content: Vec<u8>) {
-            self.files.lock().unwrap().insert(path.to_string(), content);
+            let normalized = path.replace('\\', "/");
+            self.files.lock().unwrap().insert(normalized, content);
         }
 
         pub fn get_file(&self, path: &str) -> Option<Vec<u8>> {
