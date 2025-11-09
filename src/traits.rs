@@ -211,10 +211,17 @@ pub mod mocks {
         }
     }
 
+    impl MockFileSystem {
+        /// Normalize path separators to forward slashes for consistent cross-platform behavior
+        fn normalize_path(path: &Path) -> String {
+            path.to_string_lossy().replace('\\', "/")
+        }
+    }
+
     #[async_trait]
     impl FileSystem for MockFileSystem {
         async fn read(&self, path: &Path) -> Result<Vec<u8>> {
-            let path_str = path.to_string_lossy().to_string();
+            let path_str = Self::normalize_path(path);
             self.files
                 .lock()
                 .unwrap()
@@ -224,7 +231,7 @@ pub mod mocks {
         }
 
         async fn write(&self, path: &Path, content: &[u8]) -> Result<()> {
-            let path_str = path.to_string_lossy().to_string();
+            let path_str = Self::normalize_path(path);
             self.files
                 .lock()
                 .unwrap()
@@ -233,13 +240,13 @@ pub mod mocks {
         }
 
         async fn create_dir_all(&self, path: &Path) -> Result<()> {
-            let path_str = path.to_string_lossy().to_string();
+            let path_str = Self::normalize_path(path);
             self.directories.lock().unwrap().insert(path_str);
             Ok(())
         }
 
         async fn exists(&self, path: &Path) -> bool {
-            let path_str = path.to_string_lossy().to_string();
+            let path_str = Self::normalize_path(path);
             self.files.lock().unwrap().contains_key(&path_str)
         }
 
