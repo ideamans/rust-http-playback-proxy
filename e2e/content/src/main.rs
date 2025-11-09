@@ -847,7 +847,6 @@ async fn main() -> Result<()> {
     #[cfg(windows)]
     {
         // Windows: Send Ctrl+Break event for graceful shutdown
-        use std::os::windows::process::CommandExt;
         const CTRL_BREAK_EVENT: u32 = 1;
 
         unsafe {
