@@ -194,12 +194,19 @@ fn start_recording_proxy(
     proxy_port: u16,
     inventory_dir: &PathBuf,
 ) -> Result<Child> {
+    let binary_name = if cfg!(windows) {
+        "http-playback-proxy.exe"
+    } else {
+        "http-playback-proxy"
+    };
+
     let binary_path = std::env::current_dir()?
         .parent()
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/release/http-playback-proxy");
+        .join("target/release")
+        .join(binary_name);
 
     if !binary_path.exists() {
         anyhow::bail!(
@@ -222,12 +229,19 @@ fn start_recording_proxy(
 
 // Start playback proxy
 fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Child> {
+    let binary_name = if cfg!(windows) {
+        "http-playback-proxy.exe"
+    } else {
+        "http-playback-proxy"
+    };
+
     let binary_path = std::env::current_dir()?
         .parent()
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/release/http-playback-proxy");
+        .join("target/release")
+        .join(binary_name);
 
     if !binary_path.exists() {
         anyhow::bail!(
