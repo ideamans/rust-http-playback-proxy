@@ -1,6 +1,6 @@
 {
   "name": "http-playback-proxy",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "TypeScript/Node.js wrapper for HTTP Playback Proxy - HTTP traffic recording and playback with accurate timing",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
