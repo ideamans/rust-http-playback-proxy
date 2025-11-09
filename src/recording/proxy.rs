@@ -102,7 +102,10 @@ pub async fn start_recording_proxy(
                 all_files_exist = true;
                 break;
             } else {
-                info!("Waiting for {} content files to be written (attempt {}/10)", missing_count, attempt);
+                info!(
+                    "Waiting for {} content files to be written (attempt {}/10)",
+                    missing_count, attempt
+                );
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
             }
         }
