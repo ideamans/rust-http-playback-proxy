@@ -540,7 +540,7 @@ async fn test_recording_and_playback_integration() {
         "Starting recording proxy on port {}...",
         recording_proxy_port
     );
-    let mut recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+    let recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
         .await
         .expect("Failed to start recording proxy");
 
@@ -787,7 +787,7 @@ async fn test_recording_error_responses() {
     let playback_proxy_port = find_free_port().expect("Failed to find free port");
 
     // Start recording proxy
-    let mut recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+    let recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
         .await
         .expect("Failed to start recording proxy");
 
@@ -903,7 +903,7 @@ async fn test_recording_with_compression() {
     let playback_proxy_port = find_free_port().expect("Failed to find free port");
 
     // Start recording proxy
-    let mut recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+    let recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
         .await
         .expect("Failed to start recording proxy");
 
@@ -1028,7 +1028,7 @@ async fn test_inventory_structure_validation() {
     let recording_proxy_port = find_free_port().expect("Failed to find free port");
 
     // Start recording proxy with entry URL
-    let mut recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+    let recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
         .await
         .expect("Failed to start recording proxy");
 
