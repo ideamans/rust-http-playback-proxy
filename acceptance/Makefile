@@ -37,17 +37,25 @@ endif
 
 # Build main binary
 build:
-	@echo "Building main http-playback-proxy binary..."
-	@cd .. && cargo build --release 2>&1 | grep -v "Finished" || true
-	@echo "Main binary built successfully"
+	@echo "Checking main http-playback-proxy binary..."
+	@if [ ! -f ../target/release/http-playback-proxy ] && [ ! -f ../target/release/http-playback-proxy.exe ]; then \
+		echo "Binary not found, building..."; \
+		cd .. && cargo build --release 2>&1 | grep -v "Finished" || true; \
+		echo "Main binary built successfully"; \
+	else \
+		echo "Main binary already exists, skipping build"; \
+	fi
 	@echo ""
 	@echo "Copying binary to language bindings ($(PLATFORM))..."
 	@mkdir -p ../typescript/bin/$(PLATFORM) ../golang/bin/$(PLATFORM)
-	@rm -f ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
-	@cp -f ../target/release/http-playback-proxy$(BINARY_EXT) ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
-	@cp -f ../target/release/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
-	@chmod +x ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT)
-	@echo "Binaries copied successfully"
+	@if [ -f ../target/release/http-playback-proxy$(BINARY_EXT) ]; then \
+		cp -f ../target/release/http-playback-proxy$(BINARY_EXT) ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT); \
+		cp -f ../target/release/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT); \
+		chmod +x ../typescript/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT) ../golang/bin/$(PLATFORM)/http-playback-proxy$(BINARY_EXT) 2>/dev/null || true; \
+		echo "Binaries copied successfully"; \
+	else \
+		echo "Warning: Binary not found at ../target/release/http-playback-proxy$(BINARY_EXT)"; \
+	fi
 	@echo ""
 
 # Run all acceptance tests

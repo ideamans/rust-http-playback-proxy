@@ -8,18 +8,28 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Build main proxy binary
-echo "Step 1: Building main http-playback-proxy binary..."
+# Check/build main proxy binary
+echo "Step 1: Checking main http-playback-proxy binary..."
 cd "${PROJECT_ROOT}"
-cargo build --release
-echo "Main binary built successfully"
+if [ ! -f target/release/http-playback-proxy ] && [ ! -f target/release/http-playback-proxy.exe ]; then
+    echo "Binary not found, building..."
+    cargo build --release
+    echo "Main binary built successfully"
+else
+    echo "Main binary already exists, skipping build"
+fi
 echo ""
 
-# Build test binary
-echo "Step 2: Building test binary..."
+# Check/build test binary
+echo "Step 2: Checking test binary..."
 cd "${SCRIPT_DIR}"
-cargo build --release
-echo "Test binary built successfully"
+if [ ! -f target/release/minimum-timing-test ] && [ ! -f target/release/minimum-timing-test.exe ]; then
+    echo "Test binary not found, building..."
+    cargo build --release
+    echo "Test binary built successfully"
+else
+    echo "Test binary already exists, skipping build"
+fi
 echo ""
 
 # Run test

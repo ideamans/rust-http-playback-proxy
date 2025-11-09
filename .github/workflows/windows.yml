@@ -1,0 +1,149 @@
+name: Windows Tests
+
+on:
+  push:
+    branches:
+      - windows
+
+jobs:
+  test-windows:
+    name: Windows ${{ matrix.test-type }}
+    strategy:
+      fail-fast: false
+      matrix:
+        test-type: [unit, e2e-performance, e2e-content, integration, acceptance-go, acceptance-ts]
+
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Setup Go (for acceptance tests)
+        if: matrix.test-type == 'acceptance-go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Setup Node.js (for acceptance tests)
+        if: matrix.test-type == 'acceptance-ts'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ matrix.test-type }}-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.test-type }}-target-
+
+      - name: Unit tests
+        if: matrix.test-type == 'unit'
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo test
+
+      - name: Build main binary (for E2E and acceptance tests)
+        if: matrix.test-type != 'unit'
+        run: cargo build --release
+
+      - name: E2E Performance Test
+        if: matrix.test-type == 'e2e-performance'
+        working-directory: e2e/performance
+        shell: pwsh
+        run: |
+          cargo build --release
+          & ./run.sh
+        timeout-minutes: 5
+
+      - name: E2E Content Test
+        if: matrix.test-type == 'e2e-content'
+        working-directory: e2e/content
+        shell: bash
+        run: ./run.sh
+        timeout-minutes: 5
+
+      - name: Integration Test
+        if: matrix.test-type == 'integration'
+        run: cargo test --test integration_test
+        timeout-minutes: 5
+
+      - name: Copy binary to Go acceptance test location
+        if: matrix.test-type == 'acceptance-go'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path golang/bin/windows-amd64
+          Copy-Item target/release/http-playback-proxy.exe golang/bin/windows-amd64/
+
+      - name: Go Acceptance Test
+        if: matrix.test-type == 'acceptance-go'
+        working-directory: acceptance/golang
+        run: go test -v -timeout 5m
+        env:
+          HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/golang
+
+      - name: Copy binary to TypeScript acceptance test location
+        if: matrix.test-type == 'acceptance-ts'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path typescript/bin/windows-amd64
+          Copy-Item target/release/http-playback-proxy.exe typescript/bin/windows-amd64/
+
+      - name: Build TypeScript wrapper
+        if: matrix.test-type == 'acceptance-ts'
+        working-directory: typescript
+        run: npm run build
+
+      - name: Install TypeScript test dependencies
+        if: matrix.test-type == 'acceptance-ts'
+        working-directory: acceptance/typescript
+        run: npm install
+
+      - name: TypeScript Acceptance Test
+        if: matrix.test-type == 'acceptance-ts'
+        working-directory: acceptance/typescript
+        run: npm test
+        env:
+          HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/typescript
+
+  summary:
+    name: Windows Test Summary
+    needs: [test-windows]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.test-windows.result }}" != "success" ]; then
+            echo "❌ Some Windows tests failed"
+            echo "Test results: ${{ needs.test-windows.result }}"
+            exit 1
+          fi
+
+          echo "✅ All Windows tests passed!"

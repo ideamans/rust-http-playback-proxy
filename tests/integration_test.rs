@@ -370,31 +370,25 @@ fn get_binary_path() -> PathBuf {
     }
 }
 
-/// Build the binary if it doesn't exist
-async fn ensure_binary_built() -> Result<()> {
+/// Check if binary exists (no longer builds automatically)
+async fn ensure_binary_exists() -> Result<()> {
     let binary_path = get_binary_path();
 
     if !binary_path.exists() {
-        println!("Building binary...");
-        let output = Command::new("cargo")
-            .args(["build", "--bin", "http-playback-proxy"])
-            .output()?;
-
-        if !output.status.success() {
-            anyhow::bail!(
-                "Failed to build binary: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
+        anyhow::bail!(
+            "Binary not found at {}. Please run 'cargo build' or 'cargo build --release' first.",
+            binary_path.display()
+        );
     }
 
+    println!("Using binary: {}", binary_path.display());
     Ok(())
 }
 
 #[tokio::test]
 async fn test_recording_and_playback_integration() {
-    // Build binary if needed
-    ensure_binary_built().await.expect("Failed to build binary");
+    // Check binary exists
+    ensure_binary_exists().await.expect("Binary not found");
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let inventory_dir = temp_dir.path().to_path_buf();
@@ -685,7 +679,7 @@ async fn test_recording_and_playback_integration() {
 #[tokio::test]
 async fn test_recording_error_responses() {
     // Build binary if needed
-    ensure_binary_built().await.expect("Failed to build binary");
+    ensure_binary_exists().await.expect("Binary not found");
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let inventory_dir = temp_dir.path().to_path_buf();
@@ -814,7 +808,7 @@ async fn test_recording_error_responses() {
 #[tokio::test]
 async fn test_recording_with_compression() {
     // Build binary if needed
-    ensure_binary_built().await.expect("Failed to build binary");
+    ensure_binary_exists().await.expect("Binary not found");
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let inventory_dir = temp_dir.path().to_path_buf();
@@ -953,7 +947,7 @@ async fn test_recording_with_compression() {
 #[tokio::test]
 async fn test_inventory_structure_validation() {
     // Build binary if needed
-    ensure_binary_built().await.expect("Failed to build binary");
+    ensure_binary_exists().await.expect("Binary not found");
 
     let temp_dir = TempDir::new().expect("Failed to create temp directory");
     let inventory_dir = temp_dir.path().to_path_buf();
