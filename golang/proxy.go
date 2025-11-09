@@ -90,9 +90,7 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Create new process group
-	}
+	setProcAttributes(cmd)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
@@ -165,9 +163,7 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Create new process group
-	}
+	setProcAttributes(cmd)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
