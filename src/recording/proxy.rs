@@ -81,7 +81,6 @@ pub async fn start_recording_proxy(
 
         // Wait for async file writes to complete before exiting
         // Check for content files every second, up to 10 times
-        let contents_dir = inventory_dir_clone.join("contents");
         let mut all_files_exist = false;
 
         for attempt in 1..=10 {
