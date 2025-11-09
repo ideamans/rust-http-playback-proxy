@@ -362,6 +362,23 @@ fn start_recording_proxy(
         );
     }
 
+    #[cfg(windows)]
+    let child = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+
+        Command::new(binary_path)
+            .arg("recording")
+            .arg(entry_url)
+            .arg("--port")
+            .arg(proxy_port.to_string())
+            .arg("--inventory")
+            .arg(inventory_dir.to_str().unwrap())
+            .creation_flags(CREATE_NEW_PROCESS_GROUP)
+            .spawn()?
+    };
+
+    #[cfg(not(windows))]
     let child = Command::new(binary_path)
         .arg("recording")
         .arg(entry_url)
@@ -825,16 +842,32 @@ async fn main() -> Result<()> {
         }
         // Wait for graceful shutdown
         sleep(Duration::from_secs(3)).await;
+        let _ = recording_proxy.wait();
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        // Windows: Force kill (SIGINT not available)
-        info!("Forcefully terminating proxy on Windows");
-    }
+        // Windows: Send Ctrl+Break event for graceful shutdown
+        use std::os::windows::process::CommandExt;
+        const CTRL_BREAK_EVENT: u32 = 1;
 
-    // Force kill if still running
-    let _ = recording_proxy.kill();
-    let _ = recording_proxy.wait();
+        unsafe {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
+            }
+
+            let result = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, recording_proxy.id());
+            if result != 0 {
+                info!("Sent Ctrl+Break event, waiting for graceful shutdown");
+                sleep(Duration::from_secs(3)).await;
+                let _ = recording_proxy.wait();
+            } else {
+                info!("Failed to send Ctrl+Break, force killing");
+                let _ = recording_proxy.kill();
+                let _ = recording_proxy.wait();
+            }
+        }
+    }
 
     // === Phase 2: Verification ===
     info!("\n--- Phase 2: Verification ---");
