@@ -1,6 +1,9 @@
 name: Acceptance Tests
 
 on:
+  push:
+    branches:
+      - acceptance
   pull_request:
     branches:
       - main

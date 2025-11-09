@@ -119,3 +119,10 @@ jobs:
           # Use PAT_TOKEN to trigger the update-binaries workflow
           # GITHUB_TOKEN cannot trigger other workflows due to GitHub Actions security
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Trigger update-binaries workflow
+        if: ${{ secrets.PAT_TOKEN != '' }}
+        run: |
+          gh workflow run update-binaries.yml -f tag=${{ github.ref_name }}
+        env:
+          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
