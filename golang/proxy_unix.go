@@ -1,6 +1,6 @@
 //go:build unix
 
-package proxy
+package httpplaybackproxy
 
 import (
 	"os/exec"

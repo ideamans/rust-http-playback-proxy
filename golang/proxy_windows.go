@@ -1,6 +1,6 @@
 //go:build windows
 
-package proxy
+package httpplaybackproxy
 
 import (
 	"os/exec"
