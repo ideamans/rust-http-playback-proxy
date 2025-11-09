@@ -416,8 +416,8 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
         anyhow::bail!("Contents directory not found: {:?}", contents_dir);
     }
 
-    // Check HTML - wait for file to exist
-    let html_path = contents_dir.join("GET/http/localhost/index.html");
+    // Check HTML - wait for file to exist (method is lowercase per generate_file_path_from_url)
+    let html_path = contents_dir.join("get/http/localhost/index.html");
     wait_for_file(&html_path, 10).await?;
     let html_content = fs::read_to_string(&html_path)?;
     let html_lines = count_lines(&html_content);
@@ -437,8 +437,8 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
         );
     }
 
-    // Check CSS - wait for file to exist
-    let css_path = contents_dir.join("GET/http/localhost/style.css");
+    // Check CSS - wait for file to exist (method is lowercase per generate_file_path_from_url)
+    let css_path = contents_dir.join("get/http/localhost/style.css");
     wait_for_file(&css_path, 10).await?;
     let css_content = fs::read_to_string(&css_path)?;
     let css_lines = count_lines(&css_content);
@@ -458,8 +458,8 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
         );
     }
 
-    // Check JavaScript - wait for file to exist
-    let js_path = contents_dir.join("GET/http/localhost/script.js");
+    // Check JavaScript - wait for file to exist (method is lowercase per generate_file_path_from_url)
+    let js_path = contents_dir.join("get/http/localhost/script.js");
     wait_for_file(&js_path, 10).await?;
     let js_content = fs::read_to_string(&js_path)?;
     let js_lines = count_lines(&js_content);
