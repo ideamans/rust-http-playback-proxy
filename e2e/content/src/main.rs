@@ -392,8 +392,23 @@ fn count_lines(content: &str) -> usize {
     content.lines().count()
 }
 
+// Wait for a file to exist with retry logic
+async fn wait_for_file(path: &std::path::Path, max_attempts: u32) -> Result<()> {
+    for attempt in 1..=max_attempts {
+        if path.exists() {
+            info!("File found: {:?} (attempt {})", path, attempt);
+            return Ok(());
+        }
+        if attempt < max_attempts {
+            info!("Waiting for file: {:?} (attempt {}/{})", path, attempt, max_attempts);
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+    anyhow::bail!("File not found after {} attempts: {:?}", max_attempts, path)
+}
+
 // Verify that content was beautified
-fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
+async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
     info!("\n--- Verifying Beautified Content ---");
 
     let contents_dir = inventory_dir.join("contents");
@@ -401,11 +416,9 @@ fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
         anyhow::bail!("Contents directory not found: {:?}", contents_dir);
     }
 
-    // Check HTML
+    // Check HTML - wait for file to exist
     let html_path = contents_dir.join("GET/http/localhost/index.html");
-    if !html_path.exists() {
-        anyhow::bail!("HTML file not found: {:?}", html_path);
-    }
+    wait_for_file(&html_path, 10).await?;
     let html_content = fs::read_to_string(&html_path)?;
     let html_lines = count_lines(&html_content);
     let minified_html_lines = count_lines(MINIFIED_HTML);
@@ -424,11 +437,9 @@ fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
         );
     }
 
-    // Check CSS
+    // Check CSS - wait for file to exist
     let css_path = contents_dir.join("GET/http/localhost/style.css");
-    if !css_path.exists() {
-        anyhow::bail!("CSS file not found: {:?}", css_path);
-    }
+    wait_for_file(&css_path, 10).await?;
     let css_content = fs::read_to_string(&css_path)?;
     let css_lines = count_lines(&css_content);
     let minified_css_lines = count_lines(MINIFIED_CSS);
@@ -447,11 +458,9 @@ fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
         );
     }
 
-    // Check JavaScript
+    // Check JavaScript - wait for file to exist
     let js_path = contents_dir.join("GET/http/localhost/script.js");
-    if !js_path.exists() {
-        anyhow::bail!("JavaScript file not found: {:?}", js_path);
-    }
+    wait_for_file(&js_path, 10).await?;
     let js_content = fs::read_to_string(&js_path)?;
     let js_lines = count_lines(&js_content);
     let minified_js_lines = count_lines(MINIFIED_JS);
@@ -810,7 +819,7 @@ async fn main() -> Result<()> {
     info!("\n--- Phase 2: Verification ---");
 
     // Verify that content was beautified
-    verify_beautified_content(&inventory_dir)?;
+    verify_beautified_content(&inventory_dir).await?;
 
     // Verify that inventory has minify flags
     verify_inventory_minify_flags(&inventory_dir)?;
