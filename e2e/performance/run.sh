@@ -15,30 +15,36 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-# Step 1: Build the main binary
-echo -e "${YELLOW}Step 1: Building main http-playback-proxy binary...${NC}"
+# Step 1: Check/build the main binary
+echo -e "${YELLOW}Step 1: Checking main http-playback-proxy binary...${NC}"
 cd "${PROJECT_ROOT}"
-# Remove existing binary to ensure fresh build
-rm -f target/release/http-playback-proxy
-cargo build --release
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to build main binary${NC}"
-    exit 1
+if [ ! -f target/release/http-playback-proxy ] && [ ! -f target/release/http-playback-proxy.exe ]; then
+    echo -e "${YELLOW}Binary not found, building...${NC}"
+    cargo build --release
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to build main binary${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Main binary built successfully${NC}"
+else
+    echo -e "${GREEN}Main binary already exists, skipping build${NC}"
 fi
-echo -e "${GREEN}Main binary built successfully${NC}"
 echo ""
 
-# Step 2: Build the test binary
-echo -e "${YELLOW}Step 2: Building performance test binary...${NC}"
+# Step 2: Check/build the test binary
+echo -e "${YELLOW}Step 2: Checking performance test binary...${NC}"
 cd "${SCRIPT_DIR}"
-# Remove existing test binary to ensure fresh build
-rm -f target/release/performance-test
-cargo build --release
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to build test binary${NC}"
-    exit 1
+if [ ! -f target/release/performance-test ] && [ ! -f target/release/performance-test.exe ]; then
+    echo -e "${YELLOW}Test binary not found, building...${NC}"
+    cargo build --release
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to build test binary${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}Test binary built successfully${NC}"
+else
+    echo -e "${GREEN}Test binary already exists, skipping build${NC}"
 fi
-echo -e "${GREEN}Test binary built successfully${NC}"
 echo ""
 
 # Step 3: Run the test

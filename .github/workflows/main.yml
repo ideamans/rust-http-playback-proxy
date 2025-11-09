@@ -1,0 +1,339 @@
+name: Main Branch Tests
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-binaries:
+    name: Build release binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            platform: linux-arm64
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            platform: darwin-arm64
+            target: aarch64-apple-darwin
+          - os: macos-13
+            platform: darwin-amd64
+            target: x86_64-apple-darwin
+          - os: windows-latest
+            platform: windows-amd64
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Install cross-compilation dependencies (Linux ARM64)
+        if: matrix.platform == 'linux-arm64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache target directory
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-${{ matrix.platform }}-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.platform }}-target-
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare binary artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p artifacts/${{ matrix.platform }}
+          cp target/${{ matrix.target }}/release/http-playback-proxy artifacts/${{ matrix.platform }}/
+          chmod +x artifacts/${{ matrix.platform }}/http-playback-proxy
+
+      - name: Prepare binary artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/${{ matrix.platform }}
+          Copy-Item target/${{ matrix.target }}/release/http-playback-proxy.exe artifacts/${{ matrix.platform }}/
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: artifacts/${{ matrix.platform }}/*
+          retention-days: 1
+
+  e2e-performance:
+    name: E2E Performance Test - ${{ matrix.platform }}
+    needs: build-binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-amd64
+          - os: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: target/release/
+
+      - name: Make binary executable (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x target/release/http-playback-proxy
+
+      - name: Run performance E2E test
+        working-directory: e2e/performance
+        run: make test
+        timeout-minutes: 5
+
+  e2e-content:
+    name: E2E Content Test - ${{ matrix.platform }}
+    needs: build-binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-amd64
+          - os: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: target/release/
+
+      - name: Make binary executable (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x target/release/http-playback-proxy
+
+      - name: Run content beautification E2E test
+        working-directory: e2e/content
+        shell: bash
+        run: ./run.sh
+        timeout-minutes: 5
+
+  e2e-integration:
+    name: Integration Test - ${{ matrix.platform }}
+    needs: build-binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-amd64
+          - os: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: target/release/
+
+      - name: Make binary executable (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x target/release/http-playback-proxy
+
+      - name: Run integration tests
+        run: cargo test --test integration_test
+        timeout-minutes: 5
+
+  acceptance-golang:
+    name: Go Acceptance - ${{ matrix.platform }}
+    needs: build-binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-amd64
+          - os: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: golang/bin/${{ matrix.platform }}/
+
+      - name: Make binary executable (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x golang/bin/${{ matrix.platform }}/http-playback-proxy
+
+      - name: Download Go dependencies
+        working-directory: acceptance/golang
+        run: go mod download
+
+      - name: Run Go acceptance test
+        working-directory: acceptance/golang
+        run: go test -v -timeout 5m
+        env:
+          HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/golang
+
+  acceptance-typescript:
+    name: TypeScript Acceptance - ${{ matrix.platform }}
+    needs: build-binaries
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: macos-latest
+            platform: darwin-arm64
+          - os: macos-13
+            platform: darwin-amd64
+          - os: windows-latest
+            platform: windows-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-${{ matrix.platform }}
+          path: typescript/bin/${{ matrix.platform }}/
+
+      - name: Make binary executable (Unix)
+        if: runner.os != 'Windows'
+        run: chmod +x typescript/bin/${{ matrix.platform }}/http-playback-proxy
+
+      - name: Build TypeScript wrapper
+        working-directory: typescript
+        run: npm run build
+
+      - name: Install test dependencies
+        working-directory: acceptance/typescript
+        run: npm install
+
+      - name: Run TypeScript acceptance test
+        working-directory: acceptance/typescript
+        run: npm test
+        env:
+          HTTP_PLAYBACK_PROXY_CACHE_DIR: ${{ github.workspace }}/typescript
+
+  summary:
+    name: Test Summary
+    needs: [e2e-performance, e2e-content, e2e-integration, acceptance-golang, acceptance-typescript]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.e2e-performance.result }}" != "success" ] || \
+             [ "${{ needs.e2e-content.result }}" != "success" ] || \
+             [ "${{ needs.e2e-integration.result }}" != "success" ] || \
+             [ "${{ needs.acceptance-golang.result }}" != "success" ] || \
+             [ "${{ needs.acceptance-typescript.result }}" != "success" ]; then
+            echo "❌ Some tests failed"
+            echo "E2E Performance: ${{ needs.e2e-performance.result }}"
+            echo "E2E Content: ${{ needs.e2e-content.result }}"
+            echo "E2E Integration: ${{ needs.e2e-integration.result }}"
+            echo "Go Acceptance: ${{ needs.acceptance-golang.result }}"
+            echo "TypeScript Acceptance: ${{ needs.acceptance-typescript.result }}"
+            exit 1
+          fi
+
+          echo "✅ All tests passed on main branch!"
