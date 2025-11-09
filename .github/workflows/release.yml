@@ -122,8 +122,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Trigger update-binaries workflow
-        if: ${{ secrets.PAT_TOKEN }}
+        continue-on-error: true
         run: |
           gh workflow run update-binaries.yml -f tag=${{ github.ref_name }}
         env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN }}
+          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
