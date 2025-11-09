@@ -3,6 +3,7 @@ name: Acceptance Tests
 on:
   push:
     branches:
+      - main
       - acceptance
   pull_request:
     branches:
