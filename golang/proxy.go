@@ -212,7 +212,10 @@ func (p *Proxy) Stop() error {
 			// Exit code 130 is expected for SIGINT, -1 for signals, 0 for success
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode := exitErr.ExitCode()
-				if exitCode == 0 || exitCode == 130 || exitCode == -1 {
+				// Windows: 0xc000013a (STATUS_CONTROL_C_EXIT) = 3221225786 or -1073741510
+				// Unix: 130 (128 + SIGINT=2) or -1 for signals
+				if exitCode == 0 || exitCode == 130 || exitCode == -1 ||
+				   exitCode == 3221225786 || exitCode == -1073741510 {
 					// Normal exit codes for graceful shutdown
 					return nil
 				}

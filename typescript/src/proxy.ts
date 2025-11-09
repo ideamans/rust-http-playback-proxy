@@ -77,17 +77,36 @@ export class Proxy {
       // Listen for exit
       this.process.once('exit', (code, signal) => {
         clearTimeout(timeout);
-        // Exit code 130 is expected for SIGINT, null can also occur on some platforms
+        // Exit code 130 is expected for SIGINT on Unix
+        // Exit code 3221225786 (0xc000013a) is STATUS_CONTROL_C_EXIT on Windows
+        // null can also occur on some platforms
         // Also accept signal === 'SIGINT' as success
-        if (code === 0 || code === 130 || code === null || signal === 'SIGINT') {
+        if (code === 0 || code === 130 || code === 3221225786 || code === null || signal === 'SIGINT') {
           resolve();
         } else {
           reject(new Error(`Proxy exited with code ${code} signal ${signal}`));
         }
       });
 
-      // Send SIGINT for graceful shutdown
-      this.process.kill('SIGINT');
+      // Send platform-specific graceful shutdown signal
+      if (process.platform === 'win32') {
+        // On Windows, Node.js maps SIGINT to Ctrl+C and SIGBREAK to Ctrl+Break
+        // We try SIGBREAK first, then fall back to SIGINT
+        try {
+          this.process.kill('SIGBREAK');
+        } catch (e) {
+          // If SIGBREAK is not supported, try SIGINT
+          try {
+            this.process.kill('SIGINT');
+          } catch (e2) {
+            // Last resort: forceful kill
+            this.process.kill('SIGTERM');
+          }
+        }
+      } else {
+        // On Unix, send SIGINT for graceful shutdown
+        this.process.kill('SIGINT');
+      }
     });
   }
 
@@ -170,10 +189,19 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   args.push('--inventory', inventoryDir);
 
   // Start the process with piped stdout to capture port info
-  const proc = spawn(binaryPath, args, {
+  // On Windows, create new process group to enable Ctrl+C/Ctrl+Break events
+  const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
     detached: false,
-  });
+  };
+
+  if (process.platform === 'win32') {
+    spawnOptions.windowsVerbatimArguments = false;
+    // CREATE_NEW_PROCESS_GROUP flag for Windows
+    spawnOptions.detached = false;
+  }
+
+  const proc = spawn(binaryPath, args, spawnOptions);
 
   const proxy = new Proxy('recording', port, inventoryDir, options.entryUrl, deviceType);
   proxy.setProcess(proc);
@@ -253,10 +281,19 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   args.push('--inventory', inventoryDir);
 
   // Start the process with piped stdout to capture port info
-  const proc = spawn(binaryPath, args, {
+  // On Windows, create new process group to enable Ctrl+C/Ctrl+Break events
+  const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
     detached: false,
-  });
+  };
+
+  if (process.platform === 'win32') {
+    spawnOptions.windowsVerbatimArguments = false;
+    // CREATE_NEW_PROCESS_GROUP flag for Windows
+    spawnOptions.detached = false;
+  }
+
+  const proc = spawn(binaryPath, args, spawnOptions);
 
   const proxy = new Proxy('playback', port, inventoryDir);
   proxy.setProcess(proc);
