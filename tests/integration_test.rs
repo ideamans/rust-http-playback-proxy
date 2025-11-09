@@ -347,15 +347,21 @@ async fn start_playback_proxy(port: u16, inventory_dir: &Path) -> Result<Child> 
 
 /// Get the path to the compiled binary
 fn get_binary_path() -> PathBuf {
+    let binary_name = if cfg!(windows) {
+        "http-playback-proxy.exe"
+    } else {
+        "http-playback-proxy"
+    };
+
     let mut debug_path = std::env::current_dir().expect("Failed to get current directory");
     debug_path.push("target");
     debug_path.push("debug");
-    debug_path.push("http-playback-proxy");
+    debug_path.push(binary_name);
 
     let mut release_path = std::env::current_dir().expect("Failed to get current directory");
     release_path.push("target");
     release_path.push("release");
-    release_path.push("http-playback-proxy");
+    release_path.push(binary_name);
 
     // Prefer debug binary for testing (more logging)
 

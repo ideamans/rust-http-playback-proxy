@@ -804,12 +804,19 @@ async fn main() -> Result<()> {
 
     // Send SIGINT to recording proxy for graceful shutdown
     info!("\nStopping recording proxy");
-    unsafe {
-        libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+        }
+        // Wait for graceful shutdown
+        sleep(Duration::from_secs(3)).await;
     }
-
-    // Wait for graceful shutdown
-    sleep(Duration::from_secs(3)).await;
+    #[cfg(not(unix))]
+    {
+        // Windows: Force kill (SIGINT not available)
+        info!("Forcefully terminating proxy on Windows");
+    }
 
     // Force kill if still running
     let _ = recording_proxy.kill();

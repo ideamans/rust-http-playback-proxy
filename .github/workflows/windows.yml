@@ -114,6 +114,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path typescript/bin/windows-amd64
           Copy-Item target/release/http-playback-proxy.exe typescript/bin/windows-amd64/
 
+      - name: Install TypeScript wrapper dependencies
+        if: matrix.test-type == 'acceptance-ts'
+        working-directory: typescript
+        run: npm install
+
       - name: Build TypeScript wrapper
         if: matrix.test-type == 'acceptance-ts'
         working-directory: typescript

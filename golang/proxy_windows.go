@@ -40,7 +40,7 @@ func stopProcess(proc *os.Process) error {
 
 	// Send CTRL_BREAK_EVENT to the process group
 	// This is the Windows equivalent of SIGINT for graceful shutdown
-	r1, _, err := procGenerateConsoleCtrlEvent.Call(
+	r1, _, _ := procGenerateConsoleCtrlEvent.Call(
 		uintptr(CTRL_BREAK_EVENT),
 		uintptr(proc.Pid),
 	)
