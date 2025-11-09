@@ -44,7 +44,16 @@ jobs:
         if: matrix.platform == 'linux-arm64'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Configure cross-compilation linker (Linux ARM64)
+        if: matrix.platform == 'linux-arm64'
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml << EOF
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
 
       - name: Cache cargo registry
         uses: actions/cache@v4
