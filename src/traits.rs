@@ -198,11 +198,13 @@ pub mod mocks {
         }
 
         pub fn get_file(&self, path: &str) -> Option<Vec<u8>> {
-            self.files.lock().unwrap().get(path).cloned()
+            let normalized = path.replace('\\', "/");
+            self.files.lock().unwrap().get(&normalized).cloned()
         }
 
         pub fn file_exists(&self, path: &str) -> bool {
-            self.files.lock().unwrap().contains_key(path)
+            let normalized = path.replace('\\', "/");
+            self.files.lock().unwrap().contains_key(&normalized)
         }
 
         #[cfg(test)]
