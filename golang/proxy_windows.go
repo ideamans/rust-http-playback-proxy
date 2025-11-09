@@ -5,19 +5,33 @@ package httpplaybackproxy
 import (
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 // setProcAttributes sets Windows-specific process attributes
 func setProcAttributes(cmd *exec.Cmd) {
-	// Windows doesn't support Setpgid
-	// Process groups work differently on Windows
+	// Create a new process group on Windows
+	// This is required to send console control events (Ctrl+C/Ctrl+Break)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+	}
 }
 
-// stopProcess terminates the process on Windows
-// Windows doesn't support SIGINT, so we use Kill() which triggers
-// the process's cleanup handlers (including Ctrl+C handler if registered)
+// stopProcess sends Ctrl+Break event on Windows for graceful shutdown
 func stopProcess(proc *os.Process) error {
-	// On Windows, Kill sends a termination signal that allows
-	// graceful shutdown if the process has registered handlers
-	return proc.Kill()
+	// Try to send os.Interrupt (maps to CTRL_BREAK_EVENT on Windows)
+	// This allows the Rust process to run its Ctrl+C handler
+	err := proc.Signal(os.Interrupt)
+
+	// If the process is already done, that's success
+	if err == os.ErrProcessDone {
+		return nil
+	}
+
+	// If Signal fails (headless console), fall back to Kill as safety net
+	if err != nil {
+		return proc.Kill()
+	}
+
+	return nil
 }
