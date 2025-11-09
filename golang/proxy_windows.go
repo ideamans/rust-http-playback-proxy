@@ -8,6 +8,16 @@ import (
 	"syscall"
 )
 
+var (
+	kernel32                  = syscall.NewLazyDLL("kernel32.dll")
+	procGenerateConsoleCtrlEvent = kernel32.NewProc("GenerateConsoleCtrlEvent")
+)
+
+const (
+	CTRL_C_EVENT        = 0
+	CTRL_BREAK_EVENT    = 1
+)
+
 // setProcAttributes sets Windows-specific process attributes
 func setProcAttributes(cmd *exec.Cmd) {
 	// Create a new process group on Windows
@@ -19,17 +29,24 @@ func setProcAttributes(cmd *exec.Cmd) {
 
 // stopProcess sends Ctrl+Break event on Windows for graceful shutdown
 func stopProcess(proc *os.Process) error {
-	// Try to send os.Interrupt (maps to CTRL_BREAK_EVENT on Windows)
-	// This allows the Rust process to run its Ctrl+C handler
-	err := proc.Signal(os.Interrupt)
-
-	// If the process is already done, that's success
-	if err == os.ErrProcessDone {
+	if proc == nil {
 		return nil
 	}
 
-	// If Signal fails (headless console), fall back to Kill as safety net
-	if err != nil {
+	// If the process is already done, that's success
+	if proc.Pid == -1 {
+		return nil
+	}
+
+	// Send CTRL_BREAK_EVENT to the process group
+	// This is the Windows equivalent of SIGINT for graceful shutdown
+	r1, _, err := procGenerateConsoleCtrlEvent.Call(
+		uintptr(CTRL_BREAK_EVENT),
+		uintptr(proc.Pid),
+	)
+
+	if r1 == 0 {
+		// GenerateConsoleCtrlEvent failed, fall back to Kill
 		return proc.Kill()
 	}
 
