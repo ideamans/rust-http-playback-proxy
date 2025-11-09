@@ -193,11 +193,11 @@ func (p *Proxy) Stop() error {
 		return fmt.Errorf("proxy is not running")
 	}
 
-	// Send SIGINT for graceful shutdown (especially important for recording mode)
-	if err := p.cmd.Process.Signal(syscall.SIGINT); err != nil {
-		// If SIGINT fails, cancel the context
+	// Platform-specific process termination
+	if err := stopProcess(p.cmd.Process); err != nil {
+		// If stop fails, cancel the context
 		p.cancel()
-		return fmt.Errorf("failed to send SIGINT: %w", err)
+		return fmt.Errorf("failed to stop process: %w", err)
 	}
 
 	// Wait for the process to exit with a timeout
