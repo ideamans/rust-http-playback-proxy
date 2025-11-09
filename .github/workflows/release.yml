@@ -122,7 +122,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Trigger update-binaries workflow
-        if: ${{ secrets.PAT_TOKEN != '' }}
+        if: secrets.PAT_TOKEN != ''
         run: |
           gh workflow run update-binaries.yml -f tag=${{ github.ref_name }}
         env:
