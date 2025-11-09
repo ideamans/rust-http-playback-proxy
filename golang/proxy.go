@@ -90,9 +90,7 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Create new process group
-	}
+	setProcAttributes(cmd)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
@@ -165,9 +163,7 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, // Create new process group
-	}
+	setProcAttributes(cmd)
 
 	// Start the process
 	if err := cmd.Start(); err != nil {
@@ -197,11 +193,11 @@ func (p *Proxy) Stop() error {
 		return fmt.Errorf("proxy is not running")
 	}
 
-	// Send SIGINT for graceful shutdown (especially important for recording mode)
-	if err := p.cmd.Process.Signal(syscall.SIGINT); err != nil {
-		// If SIGINT fails, cancel the context
+	// Platform-specific process termination
+	if err := stopProcess(p.cmd.Process); err != nil {
+		// If stop fails, cancel the context
 		p.cancel()
-		return fmt.Errorf("failed to send SIGINT: %w", err)
+		return fmt.Errorf("failed to stop process: %w", err)
 	}
 
 	// Wait for the process to exit with a timeout
@@ -213,11 +209,11 @@ func (p *Proxy) Stop() error {
 	select {
 	case err := <-done:
 		if err != nil {
-			// Exit code 130 is expected for SIGINT, and some systems also return -1
+			// Exit code 130 is expected for SIGINT, -1 for signals, 0 for success
 			if exitErr, ok := err.(*exec.ExitError); ok {
 				exitCode := exitErr.ExitCode()
-				if exitCode == 130 || exitCode == -1 {
-					// SIGINT is a normal way to stop the proxy
+				if exitCode == 0 || exitCode == 130 || exitCode == -1 {
+					// Normal exit codes for graceful shutdown
 					return nil
 				}
 			}
@@ -227,6 +223,7 @@ func (p *Proxy) Stop() error {
 			}
 			return fmt.Errorf("proxy exited with error: %w", err)
 		}
+		// Exit code 0 - success
 		return nil
 	case <-time.After(10 * time.Second):
 		// Force kill if graceful shutdown takes too long
