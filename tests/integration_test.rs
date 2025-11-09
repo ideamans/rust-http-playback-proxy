@@ -292,16 +292,25 @@ async fn start_recording_proxy(port: u16, inventory_dir: &Path) -> Result<Child>
     }
     println!("Recording proxy confirmed listening on port {}", port);
 
-    // Also check if the process is actually running
-    let output = Command::new("lsof")
-        .args(["-i", &format!(":{}", port)])
-        .output()
-        .expect("Failed to run lsof");
-    println!(
-        "Port {} usage: {}",
-        port,
-        String::from_utf8_lossy(&output.stdout)
-    );
+    // Also check if the process is actually running (Unix only)
+    #[cfg(unix)]
+    {
+        let output = Command::new("lsof")
+            .args(["-i", &format!(":{}", port)])
+            .output()
+            .expect("Failed to run lsof");
+        println!(
+            "Port {} usage: {}",
+            port,
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+
+    #[cfg(windows)]
+    {
+        // On Windows, we rely on the TcpStream connection check above
+        println!("Port {} is listening (confirmed via TcpStream)", port);
+    }
 
     // Check the child process status (temporarily disabled to avoid port conflicts)
     match child.try_wait() {
