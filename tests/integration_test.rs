@@ -6,6 +6,22 @@ use std::time::Duration;
 use tempfile::TempDir;
 use tokio::time::{sleep, timeout};
 
+// Windows-specific console event sending
+#[cfg(windows)]
+fn send_ctrl_break_event(process_id: u32) -> std::io::Result<()> {
+    use windows_sys::Win32::System::Console::GenerateConsoleCtrlEvent;
+
+    const CTRL_BREAK_EVENT: u32 = 1;
+
+    unsafe {
+        let result = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, process_id);
+        if result == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
+}
+
 mod static_server {
     use anyhow::Result;
     use http_body_util::Full;
@@ -268,6 +284,29 @@ async fn start_recording_proxy(port: u16, inventory_dir: &Path) -> Result<Child>
         inventory_dir.display()
     );
 
+    #[cfg(windows)]
+    let mut child = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+
+        Command::new(&binary_path)
+            .args([
+                "recording",
+                "--port",
+                &port.to_string(),
+                "--device",
+                "desktop",
+                "--inventory",
+                &inventory_dir.to_string_lossy(),
+            ])
+            .env("RUST_LOG", "info")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .creation_flags(CREATE_NEW_PROCESS_GROUP)
+            .spawn()?
+    };
+
+    #[cfg(not(windows))]
     let mut child = Command::new(&binary_path)
         .args([
             "recording",
@@ -330,6 +369,82 @@ async fn start_recording_proxy(port: u16, inventory_dir: &Path) -> Result<Child>
     }
 
     Ok(child)
+}
+
+/// Stop recording proxy gracefully
+async fn stop_recording_proxy(mut recording_proxy: Child) {
+    println!("Stopping recording proxy...");
+
+    #[cfg(unix)]
+    {
+        // Send SIGINT (Ctrl+C) to allow graceful shutdown and inventory saving
+        unsafe {
+            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+        }
+        // Wait for graceful shutdown
+        match timeout(Duration::from_secs(5), async {
+            loop {
+                match recording_proxy.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) => {
+                        sleep(Duration::from_millis(100)).await;
+                        continue;
+                    }
+                    Err(_) => break,
+                }
+            }
+        })
+        .await
+        {
+            Ok(_) => println!("Recording proxy shut down gracefully"),
+            Err(_) => {
+                println!("Recording proxy did not shut down gracefully, force killing");
+                let _ = recording_proxy.kill();
+                let _ = recording_proxy.wait();
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // Send Ctrl+Break event for graceful shutdown
+        let process_id = recording_proxy.id();
+        match send_ctrl_break_event(process_id) {
+            Ok(_) => {
+                println!("Sent Ctrl+Break event to recording proxy");
+                // Wait for graceful shutdown
+                match timeout(Duration::from_secs(5), async {
+                    loop {
+                        match recording_proxy.try_wait() {
+                            Ok(Some(_)) => break,
+                            Ok(None) => {
+                                sleep(Duration::from_millis(100)).await;
+                                continue;
+                            }
+                            Err(_) => break,
+                        }
+                    }
+                })
+                .await
+                {
+                    Ok(_) => println!("Recording proxy shut down gracefully"),
+                    Err(_) => {
+                        println!("Recording proxy did not shut down gracefully, force killing");
+                        let _ = recording_proxy.kill();
+                        let _ = recording_proxy.wait();
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Failed to send Ctrl+Break event: {}, force killing", e);
+                let _ = recording_proxy.kill();
+                let _ = recording_proxy.wait();
+            }
+        }
+    }
+
+    // Wait a moment for files to be written
+    sleep(Duration::from_millis(2000)).await;
 }
 
 /// Start the HTTP playback proxy in playback mode
@@ -495,44 +610,7 @@ async fn test_recording_and_playback_integration() {
     println!("Requests completed successfully");
 
     // Step 4: Stop recording proxy gracefully
-    println!("Stopping recording proxy...");
-    #[cfg(unix)]
-    {
-        // Send SIGINT (Ctrl+C) to allow graceful shutdown and inventory saving
-        unsafe {
-            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
-        }
-        // Wait for graceful shutdown
-        match timeout(Duration::from_secs(5), async {
-            loop {
-                match recording_proxy.try_wait() {
-                    Ok(Some(_)) => break,
-                    Ok(None) => {
-                        sleep(Duration::from_millis(100)).await;
-                        continue;
-                    }
-                    Err(_) => break,
-                }
-            }
-        })
-        .await
-        {
-            Ok(_) => println!("Recording proxy shut down gracefully"),
-            Err(_) => {
-                println!("Recording proxy did not shut down gracefully, force killing");
-                let _ = recording_proxy.kill();
-                let _ = recording_proxy.wait();
-            }
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = recording_proxy.kill();
-        let _ = recording_proxy.wait();
-    }
-
-    // Wait a moment for files to be written
-    sleep(Duration::from_millis(2000)).await;
+    stop_recording_proxy(recording_proxy).await;
 
     // Step 5: Stop static server
     println!("Stopping static server...");
@@ -734,20 +812,7 @@ async fn test_recording_error_responses() {
     assert!(error_content.contains("500 Internal Server Error"));
 
     // Stop recording proxy gracefully
-    #[cfg(unix)]
-    {
-        unsafe {
-            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
-        }
-        sleep(Duration::from_secs(3)).await;
-        let _ = recording_proxy.wait();
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = recording_proxy.kill();
-        let _ = recording_proxy.wait();
-        sleep(Duration::from_millis(2000)).await;
-    }
+    stop_recording_proxy(recording_proxy).await;
 
     static_server.shutdown();
 
@@ -858,20 +923,7 @@ async fn test_recording_with_compression() {
     let _br_content = response.text().await.expect("Failed to read response");
 
     // Stop recording proxy gracefully
-    #[cfg(unix)]
-    {
-        unsafe {
-            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
-        }
-        sleep(Duration::from_secs(3)).await;
-        let _ = recording_proxy.wait();
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = recording_proxy.kill();
-        let _ = recording_proxy.wait();
-        sleep(Duration::from_millis(2000)).await;
-    }
+    stop_recording_proxy(recording_proxy).await;
 
     static_server.shutdown();
 
@@ -987,20 +1039,7 @@ async fn test_inventory_structure_validation() {
     let _ = client.get(format!("{}/style.css", server_url)).send().await;
 
     // Stop recording proxy gracefully
-    #[cfg(unix)]
-    {
-        unsafe {
-            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
-        }
-        sleep(Duration::from_secs(3)).await;
-        let _ = recording_proxy.wait();
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = recording_proxy.kill();
-        let _ = recording_proxy.wait();
-        sleep(Duration::from_millis(2000)).await;
-    }
+    stop_recording_proxy(recording_proxy).await;
 
     static_server.shutdown();
 
