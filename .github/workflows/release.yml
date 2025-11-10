@@ -63,6 +63,10 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Build Windows signal helper
+        if: runner.os == 'Windows'
+        run: cargo build --release --bin windows-signal-helper --target ${{ matrix.target }}
+
       - name: Prepare binary (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -78,6 +82,7 @@ jobs:
         run: |
           mkdir release-${{ matrix.platform }}
           cp target/${{ matrix.target }}/release/http-playback-proxy.exe release-${{ matrix.platform }}/
+          cp target/${{ matrix.target }}/release/windows-signal-helper.exe release-${{ matrix.platform }}/
           cd release-${{ matrix.platform }}
           tar czf ../http-playback-proxy-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz .
           cd ..

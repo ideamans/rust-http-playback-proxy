@@ -1,8 +1,40 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execFile } from 'child_process';
+import { promisify } from 'util';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ensureBinary, getFullBinaryPath } from './binary';
 import type { ProxyMode, RecordingOptions, PlaybackOptions, Inventory } from './types';
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Get the path to the Windows signal helper binary
+ */
+function getSignalHelperPath(): string {
+  // Signal helper is in the same directory as the main binary
+  const mainBinaryPath = getFullBinaryPath();
+  const dir = path.dirname(mainBinaryPath);
+  const helperName = 'windows-signal-helper.exe';
+  return path.join(dir, helperName);
+}
+
+/**
+ * Send Ctrl+C signal to a Windows process using the signal helper
+ */
+async function sendWindowsCtrlC(pid: number): Promise<void> {
+  const helperPath = getSignalHelperPath();
+
+  if (!fs.existsSync(helperPath)) {
+    throw new Error(`Windows signal helper not found at ${helperPath}`);
+  }
+
+  try {
+    await execFileAsync(helperPath, [pid.toString()]);
+  } catch (err: any) {
+    // Helper returns non-zero on error
+    throw new Error(`Failed to send Ctrl+C to process ${pid}: ${err.message}`);
+  }
+}
 
 /**
  * Represents a running proxy instance
@@ -90,20 +122,24 @@ export class Proxy {
 
       // Send platform-specific graceful shutdown signal
       if (process.platform === 'win32') {
-        // On Windows, Node.js doesn't support sending Ctrl+C to child processes
-        // The Rust binary uses ctrlc crate which catches Ctrl+C events
-        // We'll send SIGINT which Node.js will translate to a termination signal
-        // The timeout will catch if it doesn't shut down gracefully
-        try {
-          this.process.kill('SIGINT');
-        } catch (e) {
-          // If SIGINT fails, try SIGTERM
-          try {
-            this.process.kill('SIGTERM');
-          } catch {
-            // Ignore if already dead
-          }
+        // On Windows, use the signal helper binary to send Ctrl+Break
+        // This properly triggers the Rust ctrlc handler
+        const pid = this.process.pid;
+        if (!pid) {
+          reject(new Error('Process PID not available'));
+          return;
         }
+
+        sendWindowsCtrlC(pid)
+          .catch((err) => {
+            // If helper fails, fall back to SIGTERM
+            console.warn(`Signal helper failed: ${err.message}, falling back to SIGTERM`);
+            try {
+              this.process?.kill('SIGTERM');
+            } catch {
+              // Ignore if already dead
+            }
+          });
       } else {
         // On Unix, send SIGINT for graceful shutdown
         this.process.kill('SIGINT');

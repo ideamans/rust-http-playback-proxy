@@ -82,6 +82,10 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Build Windows signal helper
+        if: runner.os == 'Windows'
+        run: cargo build --release --bin windows-signal-helper --target ${{ matrix.target }}
+
       - name: Prepare binary artifact (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -95,6 +99,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/${{ matrix.platform }}
           Copy-Item target/${{ matrix.target }}/release/http-playback-proxy.exe artifacts/${{ matrix.platform }}/
+          Copy-Item target/${{ matrix.target }}/release/windows-signal-helper.exe artifacts/${{ matrix.platform }}/
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -140,9 +145,18 @@ jobs:
         if: runner.os != 'Windows'
         run: chmod +x target/release/http-playback-proxy
 
-      - name: Run performance E2E test
+      - name: Run performance E2E test (Unix)
+        if: runner.os != 'Windows'
         working-directory: e2e/performance
         run: make test
+        timeout-minutes: 5
+
+      - name: Run performance E2E test (Windows)
+        if: runner.os == 'Windows'
+        working-directory: e2e/performance
+        shell: pwsh
+        run: |
+          cargo run --release
         timeout-minutes: 5
 
   e2e-content:
@@ -307,6 +321,10 @@ jobs:
       - name: Make binary executable (Unix)
         if: runner.os != 'Windows'
         run: chmod +x typescript/bin/${{ matrix.platform }}/http-playback-proxy
+
+      - name: Install TypeScript wrapper dependencies
+        working-directory: typescript
+        run: npm install
 
       - name: Build TypeScript wrapper
         working-directory: typescript
