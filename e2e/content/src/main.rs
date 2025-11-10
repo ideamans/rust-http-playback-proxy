@@ -861,8 +861,9 @@ async fn main() -> Result<()> {
         }
     });
 
-    // Wait for server to start
-    sleep(Duration::from_secs(2)).await;
+    // Wait for mock server to be ready
+    info!("Waiting for mock server to be ready...");
+    wait_for_proxy(mock_server_port, 30).await?;
 
     // Create temporary inventory directory
     let temp_dir = tempfile::tempdir()?;
