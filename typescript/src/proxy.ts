@@ -90,17 +90,18 @@ export class Proxy {
 
       // Send platform-specific graceful shutdown signal
       if (process.platform === 'win32') {
-        // On Windows, Node.js maps SIGINT to Ctrl+C and SIGBREAK to Ctrl+Break
-        // We try SIGBREAK first, then fall back to SIGINT
+        // On Windows, Node.js doesn't support sending Ctrl+C to child processes
+        // The Rust binary uses ctrlc crate which catches Ctrl+C events
+        // We'll send SIGINT which Node.js will translate to a termination signal
+        // The timeout will catch if it doesn't shut down gracefully
         try {
-          this.process.kill('SIGBREAK');
+          this.process.kill('SIGINT');
         } catch (e) {
-          // If SIGBREAK is not supported, try SIGINT
+          // If SIGINT fails, try SIGTERM
           try {
-            this.process.kill('SIGINT');
-          } catch (e2) {
-            // Last resort: forceful kill
             this.process.kill('SIGTERM');
+          } catch {
+            // Ignore if already dead
           }
         }
       } else {
@@ -177,8 +178,8 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
     args.push(options.entryUrl);
   }
 
-  // Add port option (only if not default)
-  if (options.port !== undefined) {
+  // Add port option (only if explicitly specified and not 0 or default)
+  if (options.port !== undefined && options.port !== 0 && options.port !== 18080) {
     args.push('--port', port.toString());
   }
 
