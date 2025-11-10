@@ -22,7 +22,7 @@ echo "✓ Clippy OK"
 echo ""
 
 echo "3. Running tests..."
-cargo test
+cargo test -- --test-threads=1
 echo "✓ Tests OK"
 echo ""
 

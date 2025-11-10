@@ -71,15 +71,17 @@ describe('HTTP Playback Proxy Acceptance Test', () => {
   it('should record HTTP traffic', async () => {
     console.log('Starting recording proxy...');
 
-    // Start recording proxy
+    // Start recording proxy with control port for graceful shutdown
+    const controlPort = 20000 + Math.floor(Math.random() * 1000); // Random port to avoid conflicts
     const proxy = await startRecording({
       entryUrl: serverUrl,
       port: 0, // Use default
       deviceType: 'mobile',
       inventoryDir: join(inventoryDir, 'inventory'),
+      controlPort: controlPort, // Use random control port for HTTP shutdown
     });
 
-    console.log(`Recording proxy started on port ${proxy.port}`);
+    console.log(`Recording proxy started on port ${proxy.port}, control port ${proxy.controlPort}`);
 
     // Wait for proxy to be ready
     await new Promise((resolve) => setTimeout(resolve, 1000));
