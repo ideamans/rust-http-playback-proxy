@@ -469,32 +469,32 @@ async fn start_playback_proxy(port: u16, inventory_dir: &Path) -> Result<Child> 
 
     let client = reqwest::Client::new();
     let mut connected = false;
-    for _ in 0..10 {
-        if client
+    for attempt in 1..=15 {
+        match client
             .get(&format!("http://127.0.0.1:{}/__health", port))
-            .timeout(Duration::from_millis(100))
+            .timeout(Duration::from_millis(200))
             .send()
             .await
-            .is_ok()
         {
-            // Connection succeeded, server is listening
-            connected = true;
-            break;
+            Ok(_) | Err(reqwest::Error { .. }) => {
+                // Any response (including connection errors) means server might be up
+                // Let's verify with a simple TCP connection check
+                if std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok() {
+                    connected = true;
+                    println!("Playback proxy ready on port {} (attempt {})", port, attempt);
+                    break;
+                }
+            }
         }
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_millis(300)).await;
     }
 
     if !connected {
-        // Try one more time with longer timeout
-        let _ = client
-            .get(&format!("http://127.0.0.1:{}/__health", port))
-            .timeout(Duration::from_millis(500))
-            .send()
-            .await;
+        eprintln!("Warning: Could not verify playback proxy connection on port {}", port);
     }
 
     // Give it a bit more time to fully initialize
-    sleep(Duration::from_millis(500)).await;
+    sleep(Duration::from_millis(1000)).await;
 
     Ok(child)
 }
