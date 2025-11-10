@@ -135,8 +135,7 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Download binary artifact (Unix)
-        if: runner.os != 'Windows'
+      - name: Download binary artifact
         uses: actions/download-artifact@v4
         with:
           name: binary-${{ matrix.platform }}
@@ -187,8 +186,7 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Download binary artifact (Unix)
-        if: runner.os != 'Windows'
+      - name: Download binary artifact
         uses: actions/download-artifact@v4
         with:
           name: binary-${{ matrix.platform }}
