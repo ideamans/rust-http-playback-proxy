@@ -20,6 +20,7 @@ export interface Resource {
   method: string;
   url: string;
   ttfbMs: number;
+  durationMs?: number;
   mbps?: number;
   statusCode?: number;
   errorMessage?: string;

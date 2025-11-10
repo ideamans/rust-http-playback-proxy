@@ -85,13 +85,12 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
 
         // Calculate mbps (megabits per second) from compressed body size
         // This is the actual network transfer speed, excluding latency/TTFB
-        // where download_time = download_end_ms - ttfb_ms
+        // duration_ms already represents the download time (from TTFB to end)
         let body_size = body.len() as f64; // Use compressed body size (what was actually transferred)
         #[allow(clippy::collapsible_if)]
-        if let Some(download_end_ms) = resource.download_end_ms {
-            if download_end_ms > resource.ttfb_ms {
-                let download_time_ms = download_end_ms - resource.ttfb_ms;
-                let seconds = (download_time_ms as f64) / 1000.0;
+        if let Some(duration_ms) = resource.duration_ms {
+            if duration_ms > 0 {
+                let seconds = (duration_ms as f64) / 1000.0;
                 if seconds > 0.0 {
                     // bytes/s -> bits/s -> Mb/s (megabits per second)
                     let bytes_per_second = body_size / seconds;

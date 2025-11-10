@@ -76,7 +76,7 @@ pub struct Resource {
     pub url: String,
     pub ttfb_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub download_end_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mbps: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,7 +145,7 @@ impl Resource {
             method,
             url,
             ttfb_ms: 0,
-            download_end_ms: None,
+            duration_ms: None,
             mbps: None,
             status_code: None,
             error_message: None,
