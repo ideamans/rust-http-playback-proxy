@@ -10,6 +10,7 @@ use hyper_util::rt::TokioIo;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
+use tokio::sync::broadcast;
 use tracing::{error, info};
 
 use crate::types::Transaction;
@@ -25,29 +26,110 @@ pub async fn start_playback_proxy(port: u16, transactions: Vec<Transaction>) -> 
     let shared_transactions = Arc::new(transactions);
     let start_time = Arc::new(Instant::now());
 
-    loop {
-        let (stream, _) = listener.accept().await?;
-        let shared_transactions = shared_transactions.clone();
-        let start_time = start_time.clone();
+    // Create shutdown channel
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+    let mut main_shutdown_rx = shutdown_tx.subscribe();
 
-        tokio::spawn(async move {
-            if let Err(err) = http1::Builder::new()
-                .serve_connection(
-                    TokioIo::new(stream),
-                    service_fn(|req| {
-                        handle_playback_request(
-                            req,
-                            shared_transactions.clone(),
-                            start_time.clone(),
-                        )
-                    }),
-                )
-                .await
-            {
-                error!("Error serving connection: {:?}", err);
+    // Start management API server for shutdown
+    let mgmt_port = actual_port + 1;
+    let mgmt_shutdown_tx = shutdown_tx.clone();
+    tokio::spawn(async move {
+        use http_body_util::Full;
+        use hyper::body::Bytes;
+        use std::convert::Infallible;
+
+        async fn handle_mgmt_request(
+            req: Request<Incoming>,
+            shutdown_tx: broadcast::Sender<()>,
+        ) -> Result<Response<Full<Bytes>>, Infallible> {
+            if req.uri().path() == "/_shutdown" && req.method() == hyper::Method::POST {
+                info!("Received shutdown request via management API");
+                let _ = shutdown_tx.send(());
+                Ok(Response::new(Full::new(Bytes::from("Shutting down...\n"))))
+            } else {
+                Ok(Response::builder()
+                    .status(404)
+                    .body(Full::new(Bytes::from("Not found\n")))
+                    .unwrap())
             }
-        });
+        }
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], mgmt_port));
+        let listener = match TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!("Failed to bind management API: {}", e);
+                return;
+            }
+        };
+        info!(
+            "Management API listening on http://127.0.0.1:{} (POST /_shutdown to stop)",
+            mgmt_port
+        );
+
+        loop {
+            let (stream, _) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    error!("Failed to accept connection: {}", e);
+                    continue;
+                }
+            };
+
+            let io = TokioIo::new(stream);
+            let shutdown_tx = mgmt_shutdown_tx.clone();
+
+            tokio::spawn(async move {
+                let service = service_fn(move |req| handle_mgmt_request(req, shutdown_tx.clone()));
+
+                if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                    error!("Error serving connection: {}", e);
+                }
+            });
+        }
+    });
+
+    // Main playback server loop with shutdown support
+    loop {
+        tokio::select! {
+            accept_result = listener.accept() => {
+                match accept_result {
+                    Ok((stream, _)) => {
+                        let shared_transactions = shared_transactions.clone();
+                        let start_time = start_time.clone();
+
+                        tokio::spawn(async move {
+                            if let Err(err) = http1::Builder::new()
+                                .serve_connection(
+                                    TokioIo::new(stream),
+                                    service_fn(|req| {
+                                        handle_playback_request(
+                                            req,
+                                            shared_transactions.clone(),
+                                            start_time.clone(),
+                                        )
+                                    }),
+                                )
+                                .await
+                            {
+                                error!("Error serving connection: {:?}", err);
+                            }
+                        });
+                    }
+                    Err(e) => {
+                        error!("Failed to accept connection: {}", e);
+                    }
+                }
+            }
+            _ = main_shutdown_rx.recv() => {
+                info!("Received shutdown signal, stopping playback proxy");
+                break;
+            }
+        }
     }
+
+    info!("Playback proxy stopped");
+    Ok(())
 }
 
 async fn handle_playback_request(
