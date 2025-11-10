@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::future::join_all;
 use http::{Request, Response, StatusCode};
@@ -9,7 +9,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -201,14 +201,17 @@ fn start_recording_proxy(
         "http-playback-proxy"
     };
 
-    let binary_path = std::env::current_dir()?
+    // Use CARGO_MANIFEST_DIR to get a stable path regardless of working directory
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("target")
-        .join("release")
-        .join(binary_name);
+        .and_then(Path::parent)
+        .context("failed to resolve workspace root")?;
+
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root.join("target"));
+
+    let binary_path = target_dir.join("release").join(binary_name);
 
     if !binary_path.exists() {
         anyhow::bail!(
@@ -258,14 +261,17 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
         "http-playback-proxy"
     };
 
-    let binary_path = std::env::current_dir()?
+    // Use CARGO_MANIFEST_DIR to get a stable path regardless of working directory
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("target")
-        .join("release")
-        .join(binary_name);
+        .and_then(Path::parent)
+        .context("failed to resolve workspace root")?;
+
+    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root.join("target"));
+
+    let binary_path = target_dir.join("release").join(binary_name);
 
     if !binary_path.exists() {
         anyhow::bail!(
