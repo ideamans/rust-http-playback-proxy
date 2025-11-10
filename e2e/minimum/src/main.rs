@@ -218,7 +218,8 @@ fn start_recording_proxy(
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/release")
+        .join("target")
+        .join("release")
         .join(binary_name);
 
     if !binary_path.exists() {
@@ -270,7 +271,8 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/release")
+        .join("target")
+        .join("release")
         .join(binary_name);
 
     if !binary_path.exists() {

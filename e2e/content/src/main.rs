@@ -352,7 +352,8 @@ fn start_recording_proxy(
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/release")
+        .join("target")
+        .join("release")
         .join(binary_name);
 
     if !binary_path.exists() {
@@ -681,7 +682,8 @@ async fn verify_playback_proxy(
         .unwrap()
         .parent()
         .unwrap()
-        .join("target/release")
+        .join("target")
+        .join("release")
         .join(binary_name);
 
     let mut playback_proxy = Command::new(binary_path)
