@@ -37,7 +37,7 @@ mod tests {
 
         // Verify file was created
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         assert!(mock_fs.file_exists(&inventory_path));
@@ -95,7 +95,7 @@ mod tests {
 
         // Directory should have been created
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         assert!(mock_fs.file_exists(&inventory_path));
@@ -125,7 +125,7 @@ mod tests {
 
         // Get the saved JSON
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         let saved_json = mock_fs.get_file(&inventory_path).unwrap();
@@ -259,7 +259,7 @@ mod tests {
 
         // Get the saved JSON
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         let saved_json = mock_fs.get_file(&inventory_path).unwrap();

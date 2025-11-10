@@ -244,7 +244,7 @@ pub async fn save_inventory_with_fs<F: FileSystem>(
 ) -> Result<()> {
     file_system.create_dir_all(inventory_dir).await?;
 
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     // 2スペースインデントで整形
     let mut buf = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");

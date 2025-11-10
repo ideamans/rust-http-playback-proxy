@@ -56,7 +56,7 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 2. ブラウザのプロキシを`127.0.0.1:8080` (または表示されたポート)に設定
 3. ブラウザでWebサイトを訪問
 4. `Ctrl+C`で停止して録画を保存
-5. `./inventory/inventory.json`と`./inventory/contents/`を確認
+5. `./inventory/index.json`と`./inventory/contents/`を確認
 
 **手動ブラウジング (エントリURLなし):**
 ```bash
@@ -192,7 +192,7 @@ p.Stop()
 **Inventoryの操作:**
 ```go
 // Inventoryを読み込み
-inventory, err := proxy.LoadInventory("./inventory/inventory.json")
+inventory, err := proxy.LoadInventory("./inventory/index.json")
 if err != nil {
     panic(err)
 }
@@ -275,7 +275,7 @@ playback().catch(console.error);
 import { loadInventory, getResourceContentPath } from 'http-playback-proxy';
 
 // Inventoryを読み込み
-const inventory = await loadInventory('./inventory/inventory.json');
+const inventory = await loadInventory('./inventory/index.json');
 
 // リソースを反復処理
 for (const [i, resource] of inventory.resources.entries()) {
@@ -305,7 +305,7 @@ for (const [i, resource] of inventory.resources.entries()) {
 ### データ構造
 
 録画データの保存形式：
-- `inventory.json`: 全リソースのメタデータ (URL、タイミング、ヘッダー)
+- `index.json`: 全リソースのメタデータ (URL、タイミング、ヘッダー)
 - `contents/`: method/protocol/pathで整理されたコンテンツファイル
 
 **Inventory構造:**

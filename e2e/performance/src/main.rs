@@ -469,7 +469,7 @@ fn verify_inventory(
     resources: &[TestResource],
     tolerance: f64,
 ) -> Result<()> {
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 

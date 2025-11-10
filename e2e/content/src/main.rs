@@ -591,7 +591,7 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
 fn verify_inventory_minify_flags(inventory_dir: &PathBuf) -> Result<()> {
     info!("\n--- Verifying Inventory Minify Flags ---");
 
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 
@@ -653,7 +653,7 @@ fn verify_inventory_minify_flags(inventory_dir: &PathBuf) -> Result<()> {
 fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
     info!("\n--- Verifying Charset Handling in Inventory ---");
 
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 

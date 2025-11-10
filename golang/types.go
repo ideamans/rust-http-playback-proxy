@@ -84,7 +84,7 @@ func GetResourceContentPath(inventoryDir string, resource *Resource) string {
 	return filepath.Join(inventoryDir, *resource.ContentFilePath)
 }
 
-// GetInventoryPath returns the path to the inventory.json file
+// GetInventoryPath returns the path to the index.json file
 func GetInventoryPath(inventoryDir string) string {
-	return filepath.Join(inventoryDir, "inventory.json")
+	return filepath.Join(inventoryDir, "index.json")
 }
