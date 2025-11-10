@@ -1,7 +1,8 @@
 use crate::traits::{FileSystem, TimeProvider};
 use crate::types::{ContentEncodingType, Resource};
 use crate::utils::{
-    extract_charset_from_content_type, generate_file_path_from_url, is_text_resource,
+    extract_charset_from_content_type, extract_charset_from_css, extract_charset_from_html,
+    generate_file_path_from_url, is_text_resource,
 };
 use anyhow::Result;
 use encoding_rs::{Encoding, UTF_8};
@@ -44,7 +45,23 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
 
             // Extract and save charset from Content-Type for text resources
             if is_text_resource(ct) {
-                resource.content_charset = extract_charset_from_content_type(ct);
+                // First try to get charset from HTTP header
+                let mut charset = extract_charset_from_content_type(ct);
+
+                // If HTTP header doesn't have charset, try to detect from content
+                if charset.is_none() {
+                    let mime = resource.content_type_mime.as_deref().unwrap_or("");
+                    charset = if mime == "text/html" {
+                        extract_charset_from_html(&decompressed_body)
+                    } else if mime == "text/css" {
+                        extract_charset_from_css(&decompressed_body)
+                    } else {
+                        None
+                    };
+                }
+
+                resource.content_charset = charset;
+
                 // Try to process as text, fallback to binary if it fails
                 if let Err(e) = self
                     .process_text_resource(resource, &decompressed_body)

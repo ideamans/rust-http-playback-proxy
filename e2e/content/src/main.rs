@@ -304,6 +304,51 @@ async fn handle_request(
         return Ok(response);
     }
 
+    // === Charset from content tests (no HTTP header charset) ===
+    // HTML with Shift_JIS (no charset in HTTP header)
+    if path == "/charset-from-content/html-shiftjis.html" {
+        let body = encode_to_charset(HTML_SHIFT_JIS_META, SHIFT_JIS);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
+    // HTML with EUC-JP (no charset in HTTP header)
+    if path == "/charset-from-content/html-eucjp.html" {
+        let body = encode_to_charset(HTML_EUC_JP_META, EUC_JP);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
+    // CSS with Shift_JIS (no charset in HTTP header)
+    if path == "/charset-from-content/style-shiftjis.css" {
+        let body = encode_to_charset(CSS_SHIFT_JIS, SHIFT_JIS);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/css")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
+    // CSS with UTF-8 (no charset in HTTP header)
+    if path == "/charset-from-content/style-utf8.css" {
+        let body = encode_to_charset(CSS_UTF8, UTF_8);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/css")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
     // 404 for unknown paths
     let response = Response::builder()
         .status(StatusCode::NOT_FOUND)
@@ -735,6 +780,48 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
                 info!("  ✓ Deflate encoding preserved");
             }
         }
+
+        // Check charset-from-content test resources (charset detected from HTML/CSS content)
+        if url.contains("/charset-from-content/") {
+            info!("\nCharset-from-content resource: {}", url);
+            info!("  contentCharset: {:?}", resource.content_charset);
+
+            if url.contains("-shiftjis.") {
+                if resource.content_charset != Some("shift_jis".to_string()) {
+                    anyhow::bail!(
+                        "Shift_JIS resource (detected from content) should have contentCharset=shift_jis, got: {:?}",
+                        resource.content_charset
+                    );
+                }
+                info!("  ✓ Shift_JIS charset detected from content");
+            } else if url.contains("-eucjp.") {
+                if resource.content_charset != Some("euc-jp".to_string()) {
+                    anyhow::bail!(
+                        "EUC-JP resource (detected from content) should have contentCharset=euc-jp, got: {:?}",
+                        resource.content_charset
+                    );
+                }
+                info!("  ✓ EUC-JP charset detected from content");
+            } else if url.contains("-utf8.") {
+                if resource.content_charset != Some("utf-8".to_string()) {
+                    anyhow::bail!(
+                        "UTF-8 resource (detected from content) should have contentCharset=utf-8, got: {:?}",
+                        resource.content_charset
+                    );
+                }
+                info!("  ✓ UTF-8 charset detected from content");
+            }
+
+            // Verify content file is UTF-8
+            if let Some(content_file_path) = &resource.content_file_path {
+                let full_path = inventory_dir.join(content_file_path);
+                if full_path.exists() {
+                    let content = fs::read_to_string(&full_path)?;
+                    // If we can read it as UTF-8 string, it's stored as UTF-8
+                    info!("  ✓ Content file stored as UTF-8: {} bytes", content.len());
+                }
+            }
+        }
     }
 
     info!("\nAll charset and encoding metadata verified!");
@@ -941,6 +1028,13 @@ async fn main() -> Result<()> {
     info!("\nMaking requests for combination tests");
     make_request(recording_proxy_port, &format!("http://{}:{}/combo/shiftjis-gzip.html", MOCK_SERVER_HOST, mock_server_port)).await?;
     make_request(recording_proxy_port, &format!("http://{}:{}/combo/eucjp-br.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+
+    // Make requests for charset-from-content tests (no HTTP header charset)
+    info!("\nMaking requests for charset-from-content tests (detecting charset from HTML/CSS content)");
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/html-shiftjis.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/html-eucjp.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/style-shiftjis.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/style-utf8.css", MOCK_SERVER_HOST, mock_server_port)).await?;
 
     info!("\nAll requests completed");
 
