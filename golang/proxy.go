@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,8 +27,9 @@ const (
 type Proxy struct {
 	Mode         ProxyMode
 	Port         int
+	ControlPort  *int // Optional control/management API port
 	InventoryDir string
-	EntryURL     string // Only for recording mode
+	EntryURL     string     // Only for recording mode
 	DeviceType   DeviceType // Only for recording mode
 	cmd          *exec.Cmd
 	ctx          context.Context
@@ -37,16 +39,18 @@ type Proxy struct {
 
 // RecordingOptions holds options for starting a recording proxy
 type RecordingOptions struct {
-	EntryURL     string // Optional: Entry URL to start recording from
-	Port         int    // Optional: Port to use (default: 18080, will auto-search)
+	EntryURL     string     // Optional: Entry URL to start recording from
+	Port         int        // Optional: Port to use (default: 18080, will auto-search)
 	DeviceType   DeviceType // Optional: Device type (default: mobile)
-	InventoryDir string // Optional: Inventory directory (default: ./inventory)
+	InventoryDir string     // Optional: Inventory directory (default: ./inventory)
+	ControlPort  *int       // Optional: Control/management API port (enables HTTP shutdown)
 }
 
 // PlaybackOptions holds options for starting a playback proxy
 type PlaybackOptions struct {
 	Port         int
 	InventoryDir string
+	ControlPort  *int // Optional: Control/management API port (enables HTTP shutdown)
 }
 
 // StartRecording starts a recording proxy
@@ -91,6 +95,11 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 	}
 	args = append(args, "--inventory", inventoryDir)
 
+	// Add control port if specified
+	if opts.ControlPort != nil {
+		args = append(args, "--control-port", strconv.Itoa(*opts.ControlPort))
+	}
+
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 
 	// Capture stdout to extract actual port number
@@ -119,6 +128,7 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 	proxy := &Proxy{
 		Mode:         ModeRecording,
 		Port:         actualPort,
+		ControlPort:  opts.ControlPort,
 		InventoryDir: actualInventoryDir,
 		EntryURL:     opts.EntryURL,
 		DeviceType:   actualDeviceType,
@@ -201,6 +211,11 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 
 	args = append(args, "--inventory", inventoryDir)
 
+	// Add control port if specified
+	if opts.ControlPort != nil {
+		args = append(args, "--control-port", strconv.Itoa(*opts.ControlPort))
+	}
+
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 
 	// Capture stdout to extract actual port number
@@ -221,6 +236,7 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 	proxy := &Proxy{
 		Mode:         ModePlayback,
 		Port:         port,
+		ControlPort:  opts.ControlPort,
 		InventoryDir: inventoryDir,
 		cmd:          cmd,
 		ctx:          ctx,
@@ -265,20 +281,62 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 }
 
 // Stop stops the proxy gracefully
-// For recording mode, this sends SIGINT to allow the proxy to save the inventory
+// If ControlPort is set, sends HTTP shutdown request
+// Otherwise sends SIGINT/SIGTERM (platform-specific)
 func (p *Proxy) Stop() error {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return fmt.Errorf("proxy is not running")
 	}
 
-	// Platform-specific process termination
+	// Try HTTP shutdown if control port is available
+	if p.ControlPort != nil {
+		if err := p.httpShutdown(); err != nil {
+			// If HTTP shutdown fails, fall back to signal-based shutdown
+			fmt.Printf("HTTP shutdown failed: %v, falling back to signal\n", err)
+		} else {
+			// HTTP shutdown successful, wait for process to exit
+			return p.waitForExit()
+		}
+	}
+
+	// Platform-specific process termination (SIGINT/SIGTERM)
 	if err := stopProcess(p.cmd.Process); err != nil {
 		// If stop fails, cancel the context
 		p.cancel()
 		return fmt.Errorf("failed to stop process: %w", err)
 	}
 
-	// Wait for the process to exit with a timeout
+	return p.waitForExit()
+}
+
+// httpShutdown sends an HTTP shutdown request to the control API
+func (p *Proxy) httpShutdown() error {
+	if p.ControlPort == nil {
+		return fmt.Errorf("no control port configured")
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/_shutdown", *p.ControlPort)
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create shutdown request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send shutdown request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("shutdown request failed with status: %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
+// waitForExit waits for the process to exit with proper error handling
+func (p *Proxy) waitForExit() error {
 	done := make(chan error, 1)
 	go func() {
 		done <- p.cmd.Wait()
@@ -293,7 +351,7 @@ func (p *Proxy) Stop() error {
 				// Windows: 0xc000013a (STATUS_CONTROL_C_EXIT) = 3221225786 or -1073741510
 				// Unix: 130 (128 + SIGINT=2) or -1 for signals
 				if exitCode == 0 || exitCode == 130 || exitCode == -1 ||
-				   exitCode == 3221225786 || exitCode == -1073741510 {
+					exitCode == 3221225786 || exitCode == -1073741510 {
 					// Normal exit codes for graceful shutdown
 					return nil
 				}

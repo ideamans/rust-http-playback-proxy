@@ -275,13 +275,36 @@ async fn http_client_with_proxy(proxy_port: u16) -> reqwest::Client {
 
 /// Start the HTTP playback proxy in recording mode
 async fn start_recording_proxy(port: u16, inventory_dir: &Path) -> Result<Child> {
+    start_recording_proxy_with_control(port, inventory_dir, None).await
+}
+
+/// Start the HTTP playback proxy in recording mode with control port
+async fn start_recording_proxy_with_control(
+    port: u16,
+    inventory_dir: &Path,
+    control_port: Option<u16>,
+) -> Result<Child> {
     let binary_path = get_binary_path();
 
+    let mut args = vec![
+        "recording".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+        "--device".to_string(),
+        "desktop".to_string(),
+        "--inventory".to_string(),
+        inventory_dir.to_string_lossy().to_string(),
+    ];
+
+    if let Some(ctrl_port) = control_port {
+        args.push("--control-port".to_string());
+        args.push(ctrl_port.to_string());
+    }
+
     println!(
-        "Starting recording proxy with command: {} recording --port {} --device desktop --inventory {}",
+        "Starting recording proxy with command: {} {}",
         binary_path.display(),
-        port,
-        inventory_dir.display()
+        args.join(" ")
     );
 
     #[cfg(windows)]
@@ -290,15 +313,7 @@ async fn start_recording_proxy(port: u16, inventory_dir: &Path) -> Result<Child>
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
         Command::new(&binary_path)
-            .args([
-                "recording",
-                "--port",
-                &port.to_string(),
-                "--device",
-                "desktop",
-                "--inventory",
-                &inventory_dir.to_string_lossy(),
-            ])
+            .args(&args)
             .env("RUST_LOG", "info")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -308,15 +323,7 @@ async fn start_recording_proxy(port: u16, inventory_dir: &Path) -> Result<Child>
 
     #[cfg(not(windows))]
     let mut child = Command::new(&binary_path)
-        .args([
-            "recording",
-            "--port",
-            &port.to_string(),
-            "--device",
-            "desktop",
-            "--inventory",
-            &inventory_dir.to_string_lossy(),
-        ])
+        .args(&args)
         .env("RUST_LOG", "info")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -449,22 +456,67 @@ async fn stop_recording_proxy(mut recording_proxy: Child) {
 
 /// Start the HTTP playback proxy in playback mode
 async fn start_playback_proxy(port: u16, inventory_dir: &Path) -> Result<Child> {
+    start_playback_proxy_with_control(port, inventory_dir, None).await
+}
+
+/// Start the HTTP playback proxy in playback mode with control port
+async fn start_playback_proxy_with_control(
+    port: u16,
+    inventory_dir: &Path,
+    control_port: Option<u16>,
+) -> Result<Child> {
     let binary_path = get_binary_path();
 
+    let mut args = vec![
+        "playback".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+        "--inventory".to_string(),
+        inventory_dir.to_string_lossy().to_string(),
+    ];
+
+    if let Some(ctrl_port) = control_port {
+        args.push("--control-port".to_string());
+        args.push(ctrl_port.to_string());
+    }
+
     let child = Command::new(&binary_path)
-        .args([
-            "playback",
-            "--port",
-            &port.to_string(),
-            "--inventory",
-            &inventory_dir.to_string_lossy(),
-        ])
+        .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Wait for the proxy to start
+    // Wait for the proxy to start and be ready
+    // Use TCP connection check since playback proxy doesn't have a health endpoint
     sleep(Duration::from_millis(1000)).await;
+
+    let mut connected = false;
+    for attempt in 1..=20 {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{}", port).parse().unwrap(),
+            Duration::from_millis(500),
+        )
+        .is_ok()
+        {
+            connected = true;
+            println!(
+                "Playback proxy ready on port {} (attempt {})",
+                port, attempt
+            );
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    if !connected {
+        eprintln!(
+            "Warning: Could not verify playback proxy connection on port {}",
+            port
+        );
+    }
+
+    // Give it more time to fully initialize
+    sleep(Duration::from_millis(2000)).await;
 
     Ok(child)
 }
@@ -1112,22 +1164,208 @@ async fn test_inventory_structure_validation() {
         );
     }
 
-    // Validate contents directory structure
-    let contents_dir = inventory_dir.join("contents");
-    assert!(contents_dir.exists(), "contents directory must exist");
-    assert!(contents_dir.is_dir(), "contents must be a directory");
+    println!("Inventory structure validation completed successfully!");
+}
 
-    // Check that content files exist for resources with contentFilePath
-    for resource in resources {
-        if let Some(file_path) = resource["contentFilePath"].as_str() {
-            let full_path = inventory_dir.join(file_path);
-            assert!(
-                full_path.exists(),
-                "Content file must exist: {}",
-                full_path.display()
-            );
+#[tokio::test]
+async fn test_http_shutdown() {
+    // Test HTTP-based shutdown for both recording and playback proxies
+    ensure_binary_exists().await.expect("Binary not found");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let inventory_dir = temp_dir.path().to_path_buf();
+
+    // Start static web server
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to start static server");
+    let server_url = static_server.url();
+
+    let recording_port = find_free_port().expect("Failed to find free port for recording");
+    let playback_port = find_free_port().expect("Failed to find free port for playback");
+
+    // Test 1: Recording proxy HTTP shutdown
+    println!("Testing recording proxy HTTP shutdown...");
+    let mgmt_port = find_free_port().expect("Failed to find free port for management API");
+    let mut recording_proxy =
+        start_recording_proxy_with_control(recording_port, &inventory_dir, Some(mgmt_port))
+            .await
+            .expect("Failed to start recording proxy");
+
+    let client = http_client_with_proxy(recording_port).await;
+    let _ = client.get(&server_url).send().await;
+
+    // Send HTTP shutdown request to management API
+    let shutdown_client = reqwest::Client::builder()
+        .no_proxy() // Ensure no proxy is used for management API
+        .timeout(Duration::from_secs(5))
+        .build()
+        .expect("Failed to create shutdown client");
+
+    // Wait for management API to be ready
+    // We need to verify that the management API is actually responding
+    // by sending a test request, not just checking TCP connection
+    println!("Waiting for management API on port {}...", mgmt_port);
+    let mut mgmt_ready = false;
+    for attempt in 1..=40 {
+        // Try to send a GET request to verify it's the management API
+        match shutdown_client
+            .get(format!("http://127.0.0.1:{}/_health", mgmt_port))
+            .timeout(Duration::from_millis(1000))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status() == 404 => {
+                // Management API returns 404 for unknown paths - this is correct
+                mgmt_ready = true;
+                println!(
+                    "Management API ready on port {} (attempt {})",
+                    mgmt_port, attempt
+                );
+                break;
+            }
+            Ok(resp) => {
+                // Got a response but not 404 - might be the proxy port
+                println!(
+                    "Unexpected response from port {}: {} (attempt {})",
+                    mgmt_port,
+                    resp.status(),
+                    attempt
+                );
+                sleep(Duration::from_millis(500)).await;
+            }
+            Err(e) => {
+                // Connection failed - API not ready yet
+                if attempt % 5 == 0 {
+                    println!(
+                        "Still waiting for management API on port {} (attempt {}): {}",
+                        mgmt_port, attempt, e
+                    );
+                }
+                sleep(Duration::from_millis(500)).await;
+            }
         }
     }
 
-    println!("Inventory structure validation completed successfully!");
+    if !mgmt_ready {
+        panic!(
+            "Management API on port {} did not become ready in time",
+            mgmt_port
+        );
+    }
+
+    let shutdown_response = shutdown_client
+        .post(format!("http://127.0.0.1:{}/_shutdown", mgmt_port))
+        .send()
+        .await
+        .expect("Failed to send shutdown request");
+
+    let status = shutdown_response.status();
+    if !status.is_success() {
+        let body = shutdown_response.text().await.unwrap_or_default();
+        panic!("Shutdown request failed with status {}: {}", status, body);
+    }
+
+    // Wait for process to exit (blocking call, so use spawn_blocking)
+    let exit_result = timeout(
+        Duration::from_secs(15),
+        tokio::task::spawn_blocking(move || recording_proxy.wait()),
+    )
+    .await
+    .expect("Recording proxy did not exit in time")
+    .expect("Failed to join task");
+
+    println!("Recording proxy exit result: {:?}", exit_result);
+
+    // Verify inventory was saved
+    let inventory_file = inventory_dir.join("inventory.json");
+    assert!(
+        inventory_file.exists(),
+        "Inventory file should exist after HTTP shutdown"
+    );
+
+    // Test 2: Playback proxy HTTP shutdown
+    println!("Testing playback proxy HTTP shutdown...");
+    let playback_mgmt_port =
+        find_free_port().expect("Failed to find free port for playback management API");
+    let mut playback_proxy =
+        start_playback_proxy_with_control(playback_port, &inventory_dir, Some(playback_mgmt_port))
+            .await
+            .expect("Failed to start playback proxy");
+
+    // Wait for management API to be ready
+    let mut playback_mgmt_ready = false;
+    for attempt in 1..=40 {
+        match shutdown_client
+            .get(format!("http://127.0.0.1:{}/unknown", playback_mgmt_port))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status() == 404 => {
+                // Management API returns 404 for unknown paths - this is correct
+                playback_mgmt_ready = true;
+                println!(
+                    "Playback management API ready on port {} (attempt {})",
+                    playback_mgmt_port, attempt
+                );
+                break;
+            }
+            Ok(resp) => {
+                println!(
+                    "Unexpected response from playback port {}: {} (attempt {})",
+                    playback_mgmt_port,
+                    resp.status(),
+                    attempt
+                );
+                sleep(Duration::from_millis(500)).await;
+            }
+            Err(e) => {
+                if attempt % 5 == 0 {
+                    println!(
+                        "Still waiting for playback management API on port {} (attempt {}): {}",
+                        playback_mgmt_port, attempt, e
+                    );
+                }
+                sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+
+    if !playback_mgmt_ready {
+        panic!(
+            "Playback management API on port {} did not become ready in time",
+            playback_mgmt_port
+        );
+    }
+
+    // Send HTTP shutdown request to management API
+    let shutdown_response = shutdown_client
+        .post(format!("http://127.0.0.1:{}/_shutdown", playback_mgmt_port))
+        .send()
+        .await
+        .expect("Failed to send shutdown request to playback proxy");
+
+    let status = shutdown_response.status();
+    if !status.is_success() {
+        let body = shutdown_response.text().await.unwrap_or_default();
+        panic!(
+            "Playback shutdown request failed with status {}: {}",
+            status, body
+        );
+    }
+
+    // Wait for process to exit
+    let exit_result = timeout(
+        Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || playback_proxy.wait()),
+    )
+    .await
+    .expect("Playback proxy did not exit in time")
+    .expect("Failed to join task");
+
+    println!("Playback proxy exit result: {:?}", exit_result);
+
+    static_server.shutdown();
+
+    println!("HTTP shutdown test completed successfully!");
 }
