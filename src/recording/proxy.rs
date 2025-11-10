@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::broadcast;
 use tracing::{error, info};
 
 use super::hudsucker_handler::RecordingHandler;
@@ -63,14 +64,88 @@ pub async fn start_recording_proxy(
         .with_http_handler(handler)
         .build()?;
 
-    // Setup Ctrl+C handler
+    // Create shutdown channel
+    let (shutdown_tx, _) = broadcast::channel::<()>(1);
+    let mut shutdown_rx = shutdown_tx.subscribe();
+
+    // Start management API server for shutdown
+    let mgmt_port = actual_port + 1;
+    let mgmt_shutdown_tx = shutdown_tx.clone();
+    tokio::spawn(async move {
+        use http_body_util::Full;
+        use hyper::body::Bytes;
+        use hyper::body::Incoming;
+        use hyper::server::conn::http1;
+        use hyper::service::service_fn;
+        use hyper::{Request, Response};
+        use hyper_util::rt::TokioIo;
+        use std::convert::Infallible;
+
+        async fn handle_request(
+            req: Request<Incoming>,
+            shutdown_tx: broadcast::Sender<()>,
+        ) -> Result<Response<Full<Bytes>>, Infallible> {
+            if req.uri().path() == "/_shutdown" && req.method() == hyper::Method::POST {
+                info!("Received shutdown request via management API");
+                let _ = shutdown_tx.send(());
+                Ok(Response::new(Full::new(Bytes::from("Shutting down...\n"))))
+            } else {
+                Ok(Response::builder()
+                    .status(404)
+                    .body(Full::new(Bytes::from("Not found\n")))
+                    .unwrap())
+            }
+        }
+
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], mgmt_port));
+        let listener = match tokio::net::TcpListener::bind(addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                error!("Failed to bind management API: {}", e);
+                return;
+            }
+        };
+        info!(
+            "Management API listening on http://127.0.0.1:{} (POST /_shutdown to stop)",
+            mgmt_port
+        );
+
+        loop {
+            let (stream, _) = match listener.accept().await {
+                Ok(conn) => conn,
+                Err(e) => {
+                    error!("Failed to accept connection: {}", e);
+                    continue;
+                }
+            };
+
+            let io = TokioIo::new(stream);
+            let shutdown_tx = mgmt_shutdown_tx.clone();
+
+            tokio::spawn(async move {
+                let service = service_fn(move |req| handle_request(req, shutdown_tx.clone()));
+
+                if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                    error!("Error serving connection: {}", e);
+                }
+            });
+        }
+    });
+
+    // Setup Ctrl+C handler and shutdown listener
     let inventory_dir_clone = inventory_dir.clone();
     let handler_inventory_clone = handler_inventory.clone();
     tokio::spawn(async move {
-        super::signal_handler::wait_for_shutdown_signal()
-            .await
-            .expect("Failed to listen for shutdown signal");
-        info!("Received shutdown signal, saving inventory...");
+        tokio::select! {
+            _ = super::signal_handler::wait_for_shutdown_signal() => {
+                info!("Received Ctrl+C signal");
+            }
+            _ = shutdown_rx.recv() => {
+                info!("Received shutdown request");
+            }
+        }
+
+        info!("Saving inventory...");
 
         let inventory = handler_inventory_clone.lock().await;
         if let Err(e) = save_inventory(&inventory, &inventory_dir_clone).await {

@@ -1,40 +1,8 @@
-import { spawn, ChildProcess, execFile } from 'child_process';
-import { promisify } from 'util';
+import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ensureBinary, getFullBinaryPath } from './binary';
 import type { ProxyMode, RecordingOptions, PlaybackOptions, Inventory } from './types';
-
-const execFileAsync = promisify(execFile);
-
-/**
- * Get the path to the Windows signal helper binary
- */
-function getSignalHelperPath(): string {
-  // Signal helper is in the same directory as the main binary
-  const mainBinaryPath = getFullBinaryPath();
-  const dir = path.dirname(mainBinaryPath);
-  const helperName = 'windows-signal-helper.exe';
-  return path.join(dir, helperName);
-}
-
-/**
- * Send Ctrl+C signal to a Windows process using the signal helper
- */
-async function sendWindowsCtrlC(pid: number): Promise<void> {
-  const helperPath = getSignalHelperPath();
-
-  if (!fs.existsSync(helperPath)) {
-    throw new Error(`Windows signal helper not found at ${helperPath}`);
-  }
-
-  try {
-    await execFileAsync(helperPath, [pid.toString()]);
-  } catch (err: any) {
-    // Helper returns non-zero on error
-    throw new Error(`Failed to send Ctrl+C to process ${pid}: ${err.message}`);
-  }
-}
 
 /**
  * Represents a running proxy instance
@@ -46,6 +14,7 @@ export class Proxy {
   public readonly deviceType?: string;
 
   private _port: number;
+  private _mgmtPort: number;
   private process?: ChildProcess;
 
   constructor(
@@ -57,6 +26,7 @@ export class Proxy {
   ) {
     this.mode = mode;
     this._port = port;
+    this._mgmtPort = port + 1; // Management API is on proxy_port + 1
     this.inventoryDir = inventoryDir;
     this.entryUrl = entryUrl;
     this.deviceType = deviceType;
@@ -70,10 +40,18 @@ export class Proxy {
   }
 
   /**
+   * Get the management API port number
+   */
+  get mgmtPort(): number {
+    return this._mgmtPort;
+  }
+
+  /**
    * Update the port number (used internally when OS assigns a port)
    */
   updatePort(port: number): void {
     this._port = port;
+    this._mgmtPort = port + 1;
   }
 
   /**
@@ -85,7 +63,7 @@ export class Proxy {
 
   /**
    * Stop the proxy gracefully
-   * For recording mode, this sends SIGINT to allow the proxy to save the inventory
+   * Sends shutdown request via management API (cross-platform)
    */
   async stop(): Promise<void> {
     if (!this.process) {
@@ -109,41 +87,41 @@ export class Proxy {
       // Listen for exit
       this.process.once('exit', (code, signal) => {
         clearTimeout(timeout);
-        // Exit code 130 is expected for SIGINT on Unix
-        // Exit code 3221225786 (0xc000013a) is STATUS_CONTROL_C_EXIT on Windows
-        // null can also occur on some platforms
-        // Also accept signal === 'SIGINT' as success
-        if (code === 0 || code === 130 || code === 3221225786 || code === null || signal === 'SIGINT') {
+        // Exit code 0 is expected for clean shutdown
+        // Also accept null exit code and SIGINT signal
+        if (code === 0 || code === null || signal === 'SIGINT') {
           resolve();
         } else {
           reject(new Error(`Proxy exited with code ${code} signal ${signal}`));
         }
       });
 
-      // Send platform-specific graceful shutdown signal
-      if (process.platform === 'win32') {
-        // On Windows, use the signal helper binary to send Ctrl+Break
-        // This properly triggers the Rust ctrlc handler
-        const pid = this.process.pid;
-        if (!pid) {
-          reject(new Error('Process PID not available'));
-          return;
+      // Send shutdown request via management API
+      const http = require('http');
+      const req = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: this._mgmtPort,
+          path: '/_shutdown',
+          method: 'POST',
+        },
+        (res: any) => {
+          // Response received, proxy should be shutting down
+          res.resume(); // Consume response
         }
+      );
 
-        sendWindowsCtrlC(pid)
-          .catch((err) => {
-            // If helper fails, fall back to SIGTERM
-            console.warn(`Signal helper failed: ${err.message}, falling back to SIGTERM`);
-            try {
-              this.process?.kill('SIGTERM');
-            } catch {
-              // Ignore if already dead
-            }
-          });
-      } else {
-        // On Unix, send SIGINT for graceful shutdown
-        this.process.kill('SIGINT');
-      }
+      req.on('error', (err: Error) => {
+        // If HTTP request fails, fall back to SIGTERM
+        console.warn(`HTTP shutdown failed: ${err.message}, falling back to SIGTERM`);
+        try {
+          this.process?.kill('SIGTERM');
+        } catch {
+          // Ignore if already dead
+        }
+      });
+
+      req.end();
     });
   }
 
@@ -226,15 +204,13 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   args.push('--inventory', inventoryDir);
 
   // Start the process with piped stdout to capture port info
-  // On Windows, use detached process to prevent signal broadcast to parent shell
   const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
-    detached: process.platform === 'win32',
+    detached: false,
   };
 
   if (process.platform === 'win32') {
     spawnOptions.windowsVerbatimArguments = false;
-    spawnOptions.windowsHide = true;
   }
 
   const proc = spawn(binaryPath, args, spawnOptions);
@@ -317,15 +293,13 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   args.push('--inventory', inventoryDir);
 
   // Start the process with piped stdout to capture port info
-  // On Windows, use detached process to prevent signal broadcast to parent shell
   const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
-    detached: process.platform === 'win32',
+    detached: false,
   };
 
   if (process.platform === 'win32') {
     spawnOptions.windowsVerbatimArguments = false;
-    spawnOptions.windowsHide = true;
   }
 
   const proc = spawn(binaryPath, args, spawnOptions);
