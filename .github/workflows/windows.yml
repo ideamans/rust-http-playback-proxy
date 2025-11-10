@@ -52,6 +52,9 @@ jobs:
       - name: Build main binary
         run: cargo build --release
 
+      - name: Build Windows signal helper
+        run: cargo build --release --bin windows-signal-helper
+
       - name: Build E2E binaries
         run: |
           cd e2e/performance
@@ -67,6 +70,7 @@ jobs:
           name: windows-binaries
           path: |
             target/release/http-playback-proxy.exe
+            target/release/windows-signal-helper.exe
             e2e/performance/target/release/performance.exe
             e2e/content/target/release/content.exe
             e2e/minimum/target/release/minimum.exe
