@@ -341,37 +341,28 @@ fn start_recording_proxy(
     proxy_port: u16,
     inventory_dir: &PathBuf,
 ) -> Result<Child> {
-    let binary_name = if cfg!(windows) {
-        "http-playback-proxy.exe"
-    } else {
-        "http-playback-proxy"
-    };
-
-    // Use CARGO_MANIFEST_DIR to get a stable path regardless of working directory
+    // Use CARGO_MANIFEST_DIR to get workspace root
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
-    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root.join("target"));
-
-    let binary_path = target_dir.join("release").join(binary_name);
-
-    if !binary_path.exists() {
-        anyhow::bail!(
-            "Binary not found at {:?}. Please run 'cargo build --release' first.",
-            binary_path
-        );
-    }
+    let manifest_path = repo_root.join("Cargo.toml");
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
 
     #[cfg(windows)]
     let child = {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
 
-        Command::new(binary_path)
+        Command::new(cargo)
+            .arg("run")
+            .arg("--release")
+            .arg("--manifest-path")
+            .arg(manifest_path)
+            .arg("--bin")
+            .arg("http-playback-proxy")
+            .arg("--")
             .arg("recording")
             .arg(entry_url)
             .arg("--port")
@@ -383,7 +374,14 @@ fn start_recording_proxy(
     };
 
     #[cfg(not(windows))]
-    let child = Command::new(binary_path)
+    let child = Command::new(cargo)
+        .arg("run")
+        .arg("--release")
+        .arg("--manifest-path")
+        .arg(manifest_path)
+        .arg("--bin")
+        .arg("http-playback-proxy")
+        .arg("--")
         .arg("recording")
         .arg(entry_url)
         .arg("--port")
@@ -673,26 +671,23 @@ async fn verify_playback_proxy(
 ) -> Result<()> {
     info!("\n--- Verifying Playback Charset/Encoding Reproduction ---");
 
-    // Start playback proxy
-    let binary_name = if cfg!(windows) {
-        "http-playback-proxy.exe"
-    } else {
-        "http-playback-proxy"
-    };
-
-    // Use CARGO_MANIFEST_DIR to get a stable path regardless of working directory
+    // Start playback proxy using cargo run
     let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
-    let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| repo_root.join("target"));
+    let manifest_path = repo_root.join("Cargo.toml");
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
 
-    let binary_path = target_dir.join("release").join(binary_name);
-
-    let mut playback_proxy = Command::new(binary_path)
+    let mut playback_proxy = Command::new(cargo)
+        .arg("run")
+        .arg("--release")
+        .arg("--manifest-path")
+        .arg(manifest_path)
+        .arg("--bin")
+        .arg("http-playback-proxy")
+        .arg("--")
         .arg("playback")
         .arg("--port")
         .arg(playback_proxy_port.to_string())
