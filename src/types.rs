@@ -90,9 +90,7 @@ pub struct Resource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type_mime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_type_charset: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub original_charset: Option<String>,
+    pub content_charset: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -154,8 +152,7 @@ impl Resource {
             raw_headers: None,
             content_encoding: None,
             content_type_mime: None,
-            content_type_charset: None,
-            original_charset: None,
+            content_charset: None,
             content_file_path: None,
             content_utf8: None,
             content_base64: None,

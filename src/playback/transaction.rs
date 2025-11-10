@@ -61,9 +61,9 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
         content
     };
 
-    // Re-encode to original charset if this is a text resource with original_charset
-    if let Some(original_charset) = &resource.original_charset {
-        processed_content = re_encode_to_charset(&processed_content, original_charset)?;
+    // Re-encode to original charset if this is a text resource with content_charset
+    if let Some(charset) = &resource.content_charset {
+        processed_content = re_encode_to_charset(&processed_content, charset)?;
     }
 
     // Compress content if needed
@@ -84,12 +84,9 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
         crate::types::HeaderValue::Single(final_content.len().to_string()),
     );
 
-    // Update charset - use original_charset if available, otherwise fall back to content_type_charset
+    // Update charset in Content-Type header if available
     if let Some(mime_type) = &resource.content_type_mime {
-        let charset_to_use = resource
-            .original_charset
-            .as_ref()
-            .or(resource.content_type_charset.as_ref());
+        let charset_to_use = resource.content_charset.as_ref();
 
         let content_type_value = if let Some(charset) = charset_to_use {
             format!("{}; charset={}", mime_type, charset)

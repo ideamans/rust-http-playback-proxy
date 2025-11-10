@@ -65,8 +65,8 @@ struct Resource {
     #[serde(rename = "statusCode")]
     status_code: Option<u16>,
     minify: Option<bool>,
-    #[serde(rename = "originalCharset", skip_serializing_if = "Option::is_none")]
-    original_charset: Option<String>,
+    #[serde(rename = "contentCharset", skip_serializing_if = "Option::is_none")]
+    content_charset: Option<String>,
     #[serde(rename = "contentEncoding", skip_serializing_if = "Option::is_none")]
     content_encoding: Option<String>,
     #[serde(rename = "contentFilePath", skip_serializing_if = "Option::is_none")]
@@ -665,29 +665,29 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
         // Check charset test resources
         if url.contains("/charset/") {
             info!("\nCharset resource: {}", url);
-            info!("  originalCharset: {:?}", resource.original_charset);
+            info!("  contentCharset: {:?}", resource.content_charset);
 
             if url.contains("-shiftjis.") {
-                if resource.original_charset != Some("Shift_JIS".to_string()) {
+                if resource.content_charset != Some("Shift_JIS".to_string()) {
                     anyhow::bail!(
-                        "Shift_JIS resource should have originalCharset=Shift_JIS, got: {:?}",
-                        resource.original_charset
+                        "Shift_JIS resource should have contentCharset=Shift_JIS, got: {:?}",
+                        resource.content_charset
                     );
                 }
                 info!("  ✓ Shift_JIS charset preserved");
             } else if url.contains("-eucjp.") {
-                if resource.original_charset != Some("EUC-JP".to_string()) {
+                if resource.content_charset != Some("EUC-JP".to_string()) {
                     anyhow::bail!(
-                        "EUC-JP resource should have originalCharset=EUC-JP, got: {:?}",
-                        resource.original_charset
+                        "EUC-JP resource should have contentCharset=EUC-JP, got: {:?}",
+                        resource.content_charset
                     );
                 }
                 info!("  ✓ EUC-JP charset preserved");
             } else if url.contains("-utf8.") {
-                if resource.original_charset != Some("UTF-8".to_string()) {
+                if resource.content_charset != Some("UTF-8".to_string()) {
                     anyhow::bail!(
-                        "UTF-8 resource should have originalCharset=UTF-8, got: {:?}",
-                        resource.original_charset
+                        "UTF-8 resource should have contentCharset=UTF-8, got: {:?}",
+                        resource.content_charset
                     );
                 }
                 info!("  ✓ UTF-8 charset preserved");

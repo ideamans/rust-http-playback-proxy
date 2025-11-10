@@ -163,7 +163,10 @@ pub async fn start_recording_proxy(
         if let Err(e) = save_inventory(&inventory, &inventory_dir_clone).await {
             error!("Failed to save inventory: {}", e);
         } else {
-            info!("Inventory saved successfully with {} resources", inventory.resources.len());
+            info!(
+                "Inventory saved successfully with {} resources",
+                inventory.resources.len()
+            );
         }
 
         // Wait for async file writes to complete before exiting

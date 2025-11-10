@@ -409,19 +409,15 @@ async fn stop_recording_proxy(mut recording_proxy: Child) {
                 if let Some(stdout) = recording_proxy.stdout.take() {
                     use std::io::Read;
                     let mut buf = Vec::new();
-                    if let Ok(_) = std::io::BufReader::new(stdout).read_to_end(&mut buf) {
-                        if !buf.is_empty() {
-                            println!("Recording proxy stdout:\n{}", String::from_utf8_lossy(&buf));
-                        }
+                    if std::io::BufReader::new(stdout).read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                        println!("Recording proxy stdout:\n{}", String::from_utf8_lossy(&buf));
                     }
                 }
                 if let Some(stderr) = recording_proxy.stderr.take() {
                     use std::io::Read;
                     let mut buf = Vec::new();
-                    if let Ok(_) = std::io::BufReader::new(stderr).read_to_end(&mut buf) {
-                        if !buf.is_empty() {
-                            println!("Recording proxy stderr:\n{}", String::from_utf8_lossy(&buf));
-                        }
+                    if std::io::BufReader::new(stderr).read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                        println!("Recording proxy stderr:\n{}", String::from_utf8_lossy(&buf));
                     }
                 }
             }

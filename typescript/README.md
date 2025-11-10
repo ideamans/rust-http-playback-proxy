@@ -155,7 +155,7 @@ interface Resource {
   rawHeaders?: Record<string, string>;
   contentEncoding?: ContentEncodingType;
   contentTypeMime?: string;
-  contentTypeCharset?: string;
+  contentCharset?: string;
   contentFilePath?: string;
   contentUtf8?: string;
   contentBase64?: string;

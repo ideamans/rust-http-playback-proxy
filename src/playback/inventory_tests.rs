@@ -201,7 +201,7 @@ mod tests {
 
         resource.content_encoding = Some(crate::types::ContentEncodingType::Gzip);
         resource.content_type_mime = Some("application/json".to_string());
-        resource.content_type_charset = Some("UTF-8".to_string());
+        resource.content_charset = Some("UTF-8".to_string());
         resource.content_file_path = Some("put/https/api.example.com/data~id=123.json".to_string());
         resource.minify = Some(true);
 

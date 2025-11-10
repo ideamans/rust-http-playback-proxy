@@ -41,9 +41,10 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         if let Some(ct) = content_type {
             resource.content_type_mime =
                 Some(ct.split(';').next().unwrap_or(ct).trim().to_string());
-            resource.content_type_charset = extract_charset_from_content_type(ct);
 
+            // Extract and save charset from Content-Type for text resources
             if is_text_resource(ct) {
+                resource.content_charset = extract_charset_from_content_type(ct);
                 // Try to process as text, fallback to binary if it fails
                 if let Err(e) = self
                     .process_text_resource(resource, &decompressed_body)
@@ -116,15 +117,9 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
 
     #[allow(dead_code)]
     pub async fn process_text_resource(&self, resource: &mut Resource, body: &[u8]) -> Result<()> {
-        // Save original charset before conversion
-        resource.original_charset = resource.content_type_charset.clone();
-
-        // Convert to UTF-8
+        // Convert to UTF-8 (content_charset already saved in process_resource)
         let (utf8_content, _detected_encoding) =
-            self.convert_to_utf8(body, &resource.content_type_charset);
-
-        // Update charset to UTF-8 (for internal storage only)
-        resource.content_type_charset = Some("UTF-8".to_string());
+            self.convert_to_utf8(body, &resource.content_charset);
 
         // Check if content was minified by beautifying and comparing line counts
         let original_lines = utf8_content.lines().count();
