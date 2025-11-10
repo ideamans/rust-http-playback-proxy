@@ -7,8 +7,8 @@ mod utils_tests {
 
     #[test]
     fn test_find_available_port() {
-        let port = find_available_port(8080).unwrap();
-        assert!(port >= 8080);
+        let port = find_available_port(18080).unwrap();
+        assert!(port >= 18080);
         // Port is u16, so it's always within valid range
     }
 
@@ -18,7 +18,7 @@ mod utils_tests {
         assert_eq!(port, 9090);
 
         let default_port = get_port_or_default(None).unwrap();
-        assert!(default_port >= 8080);
+        assert!(default_port >= 18080);
     }
 
     #[test]

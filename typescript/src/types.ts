@@ -47,7 +47,7 @@ export interface Inventory {
  */
 export interface RecordingOptions {
   entryUrl?: string;        // Optional: Entry URL to start recording from
-  port?: number;            // Optional: Port to use (default: 8080, will auto-search)
+  port?: number;            // Optional: Port to use (default: 18080, will auto-search)
   deviceType?: DeviceType;  // Optional: Device type (default: 'mobile')
   inventoryDir?: string;    // Optional: Inventory directory (default: './inventory')
 }

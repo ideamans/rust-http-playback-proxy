@@ -1,12 +1,15 @@
 package httpplaybackproxy
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -29,12 +32,13 @@ type Proxy struct {
 	cmd          *exec.Cmd
 	ctx          context.Context
 	cancel       context.CancelFunc
+	portMutex    sync.RWMutex
 }
 
 // RecordingOptions holds options for starting a recording proxy
 type RecordingOptions struct {
 	EntryURL     string // Optional: Entry URL to start recording from
-	Port         int    // Optional: Port to use (default: 8080, will auto-search)
+	Port         int    // Optional: Port to use (default: 18080, will auto-search)
 	DeviceType   DeviceType // Optional: Device type (default: mobile)
 	InventoryDir string // Optional: Inventory directory (default: ./inventory)
 }
@@ -88,7 +92,13 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 	args = append(args, "--inventory", inventoryDir)
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Stdout = os.Stdout
+
+	// Capture stdout to extract actual port number
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
 	cmd.Stderr = os.Stderr
 	setProcAttributes(cmd)
 
@@ -101,7 +111,7 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 	// Store the actual values used (after defaults)
 	actualPort := opts.Port
 	if actualPort == 0 {
-		actualPort = 8080
+		actualPort = 18080 // Default fallback
 	}
 	actualInventoryDir := inventoryDir
 	actualDeviceType := deviceType
@@ -117,8 +127,39 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 		cancel:       cancel,
 	}
 
-	// Give the proxy a moment to start
-	time.Sleep(500 * time.Millisecond)
+	// Read stdout to find actual port number and forward output
+	portChan := make(chan int, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		// Regex that matches both "HTTPS MITM Proxy" and "Playback proxy"
+		portRegex := regexp.MustCompile(`(?:HTTPS MITM |Playback |Recording )?[Pp]roxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)`)
+		portFound := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println(line) // Forward to stdout
+
+			// Extract port number from output
+			if !portFound {
+				if matches := portRegex.FindStringSubmatch(line); len(matches) > 1 {
+					if port, err := strconv.Atoi(matches[1]); err == nil {
+						portChan <- port
+						portFound = true
+					}
+				}
+			}
+		}
+		if !portFound {
+			close(portChan) // Signal that no port was found
+		}
+	}()
+
+	// Wait for actual port number (with timeout)
+	select {
+	case port := <-portChan:
+		proxy.Port = port
+	case <-time.After(5 * time.Second):
+		// Timeout - use default port
+	}
 
 	return proxy, nil
 }
@@ -137,7 +178,7 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 	// Set defaults to match CLI behavior
 	port := opts.Port
 	if port == 0 {
-		port = 8080 // Binary will auto-search from this
+		port = 18080 // Binary will auto-search from this
 	}
 	inventoryDir := opts.InventoryDir
 	if inventoryDir == "" {
@@ -154,14 +195,20 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	args := []string{"playback"}
 
-	if port != 8080 {
+	if port != 18080 {
 		args = append(args, "--port", strconv.Itoa(port))
 	}
 
 	args = append(args, "--inventory", inventoryDir)
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-	cmd.Stdout = os.Stdout
+
+	// Capture stdout to extract actual port number
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+	}
 	cmd.Stderr = os.Stderr
 	setProcAttributes(cmd)
 
@@ -180,8 +227,39 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 		cancel:       cancel,
 	}
 
-	// Give the proxy a moment to start
-	time.Sleep(500 * time.Millisecond)
+	// Read stdout to find actual port number and forward output
+	portChan := make(chan int, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		// Regex that matches both "HTTPS MITM Proxy" and "Playback proxy"
+		portRegex := regexp.MustCompile(`(?:HTTPS MITM |Playback |Recording )?[Pp]roxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)`)
+		portFound := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			fmt.Println(line) // Forward to stdout
+
+			// Extract port number from output
+			if !portFound {
+				if matches := portRegex.FindStringSubmatch(line); len(matches) > 1 {
+					if port, err := strconv.Atoi(matches[1]); err == nil {
+						portChan <- port
+						portFound = true
+					}
+				}
+			}
+		}
+		if !portFound {
+			close(portChan) // Signal that no port was found
+		}
+	}()
+
+	// Wait for actual port number (with timeout)
+	select {
+	case port := <-portChan:
+		proxy.Port = port
+	case <-time.After(5 * time.Second):
+		// Timeout - use default port
+	}
 
 	return proxy, nil
 }

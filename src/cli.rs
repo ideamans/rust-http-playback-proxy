@@ -20,7 +20,7 @@ pub enum Commands {
         #[arg(
             short,
             long,
-            help = "Port to use for the proxy server (default: auto-detect from 8080)"
+            help = "Port to use for the proxy server (default: auto-detect from 18080)"
         )]
         port: Option<u16>,
 
@@ -41,7 +41,7 @@ pub enum Commands {
         #[arg(
             short,
             long,
-            help = "Port to use for the proxy server (default: auto-detect from 8080)"
+            help = "Port to use for the proxy server (default: auto-detect from 18080)"
         )]
         port: Option<u16>,
 

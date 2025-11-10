@@ -165,7 +165,7 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   const binaryPath = getFullBinaryPath();
 
   // Set defaults to match CLI behavior
-  const port = options.port !== undefined ? options.port : 8080;
+  const port = options.port !== undefined ? options.port : 18080;
   const deviceType = options.deviceType || 'mobile';
   const inventoryDir = options.inventoryDir || './inventory';
 
@@ -260,7 +260,7 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   const binaryPath = getFullBinaryPath();
 
   // Set defaults
-  const port = options.port !== undefined ? options.port : 8080;
+  const port = options.port !== undefined ? options.port : 18080;
   const inventoryDir = options.inventoryDir || './inventory';
 
   // Verify inventory exists
@@ -273,7 +273,7 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   const args: string[] = ['playback'];
 
   // Add port option (only if not default)
-  if (options.port !== undefined && options.port !== 8080) {
+  if (options.port !== undefined && options.port !== 18080) {
     args.push('--port', port.toString());
   }
 

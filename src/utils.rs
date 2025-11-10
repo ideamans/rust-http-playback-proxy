@@ -16,7 +16,7 @@ pub fn find_available_port(start_port: u16) -> Result<u16> {
 pub fn get_port_or_default(port: Option<u16>) -> Result<u16> {
     match port {
         Some(p) => Ok(p),
-        None => find_available_port(8080),
+        None => find_available_port(18080),
     }
 }
 
