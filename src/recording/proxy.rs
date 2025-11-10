@@ -137,7 +137,9 @@ pub async fn start_recording_proxy(
     // Setup Ctrl+C handler and shutdown listener
     let inventory_dir_clone = inventory_dir.clone();
     let handler_inventory_clone = handler_inventory.clone();
-    tokio::spawn(async move {
+    let shutdown_tx_clone = shutdown_tx.clone();
+
+    let shutdown_handler = tokio::spawn(async move {
         tokio::select! {
             _ = super::signal_handler::wait_for_shutdown_signal() => {
                 info!("Received Ctrl+C signal");
@@ -147,13 +149,21 @@ pub async fn start_recording_proxy(
             }
         }
 
+        // Trigger proxy shutdown by sending to all subscribers
+        let _ = shutdown_tx_clone.send(());
+
+        // Wait a bit for in-flight requests to complete
+        // This ensures all resources are recorded before saving inventory
+        info!("Waiting for in-flight requests to complete...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
         info!("Saving inventory...");
 
         let inventory = handler_inventory_clone.lock().await;
         if let Err(e) = save_inventory(&inventory, &inventory_dir_clone).await {
             error!("Failed to save inventory: {}", e);
         } else {
-            info!("Inventory saved successfully");
+            info!("Inventory saved successfully with {} resources", inventory.resources.len());
         }
 
         // Wait for async file writes to complete before exiting
@@ -189,18 +199,35 @@ pub async fn start_recording_proxy(
         if !all_files_exist {
             error!("Some content files may not have been written after 10 seconds");
         }
-
-        std::process::exit(0);
     });
 
     // Start the proxy server
     info!("HTTPS MITM Proxy listening on 127.0.0.1:{}", actual_port);
     info!("Configure your client to trust the self-signed CA certificate");
 
-    if let Err(e) = proxy.start().await {
-        error!("Proxy server error: {}", e);
-        return Err(e.into());
+    // Run proxy with graceful shutdown support
+    let mut proxy_shutdown_rx = shutdown_tx.subscribe();
+
+    tokio::select! {
+        result = proxy.start() => {
+            if let Err(e) = result {
+                error!("Proxy server error: {}", e);
+                return Err(e.into());
+            }
+        }
+        _ = proxy_shutdown_rx.recv() => {
+            info!("Proxy received shutdown signal");
+            // Proxy will stop accepting new connections
+            // The shutdown handler above will save the inventory
+        }
     }
+
+    // Wait for shutdown handler to complete (inventory save, file verification, etc.)
+    info!("Waiting for shutdown handler to complete...");
+    if let Err(e) = shutdown_handler.await {
+        error!("Shutdown handler error: {}", e);
+    }
+    info!("Shutdown complete");
 
     Ok(())
 }

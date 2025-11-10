@@ -403,7 +403,28 @@ async fn stop_recording_proxy(mut recording_proxy: Child) {
         })
         .await
         {
-            Ok(_) => println!("Recording proxy shut down gracefully"),
+            Ok(_) => {
+                println!("Recording proxy shut down gracefully");
+                // Read stdout/stderr to see what happened
+                if let Some(stdout) = recording_proxy.stdout.take() {
+                    use std::io::Read;
+                    let mut buf = Vec::new();
+                    if let Ok(_) = std::io::BufReader::new(stdout).read_to_end(&mut buf) {
+                        if !buf.is_empty() {
+                            println!("Recording proxy stdout:\n{}", String::from_utf8_lossy(&buf));
+                        }
+                    }
+                }
+                if let Some(stderr) = recording_proxy.stderr.take() {
+                    use std::io::Read;
+                    let mut buf = Vec::new();
+                    if let Ok(_) = std::io::BufReader::new(stderr).read_to_end(&mut buf) {
+                        if !buf.is_empty() {
+                            println!("Recording proxy stderr:\n{}", String::from_utf8_lossy(&buf));
+                        }
+                    }
+                }
+            }
             Err(_) => {
                 println!("Recording proxy did not shut down gracefully, force killing");
                 let _ = recording_proxy.kill();
