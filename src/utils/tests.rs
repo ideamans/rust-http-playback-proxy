@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod utils_tests {
     use crate::utils::{
-        extract_charset_from_content_type, find_available_port, generate_file_path_from_url,
-        get_port_or_default, is_text_resource,
+        extract_charset_from_content_type, extract_charset_from_css, extract_charset_from_html,
+        find_available_port, generate_file_path_from_url, get_port_or_default, is_text_resource,
     };
 
     #[test]
@@ -214,6 +214,116 @@ mod utils_tests {
         assert_eq!(
             extract_charset_from_content_type("text/html; charset=Shift_JIS"),
             Some("Shift_JIS".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_html_meta_charset() {
+        // <meta charset="UTF-8">
+        let html = b"<html><head><meta charset=\"UTF-8\"></head></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("utf-8".to_string())
+        );
+
+        // <meta charset='Shift_JIS'>
+        let html = b"<html><head><meta charset='Shift_JIS'></head></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("shift_jis".to_string())
+        );
+
+        // <meta charset=EUC-JP> (no quotes)
+        let html = b"<html><head><meta charset=EUC-JP></head></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("euc-jp".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_html_http_equiv() {
+        // <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+        let html = b"<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\"></head></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("utf-8".to_string())
+        );
+
+        // With Shift_JIS
+        let html = b"<html><head><meta http-equiv=\"Content-Type\" content=\"text/html; charset=Shift_JIS\"></head></html>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("shift_jis".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_html_no_charset() {
+        let html = b"<html><head><title>No charset</title></head></html>";
+        assert_eq!(extract_charset_from_html(html), None);
+    }
+
+    #[test]
+    fn test_extract_charset_from_html_case_insensitive() {
+        // Mixed case should work
+        let html = b"<HTML><HEAD><META CHARSET=\"UTF-8\"></HEAD></HTML>";
+        assert_eq!(
+            extract_charset_from_html(html),
+            Some("utf-8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_css_double_quotes() {
+        // @charset "UTF-8";
+        let css = b"@charset \"UTF-8\"; body { color: red; }";
+        assert_eq!(
+            extract_charset_from_css(css),
+            Some("utf-8".to_string())
+        );
+
+        // @charset "Shift_JIS";
+        let css = b"@charset \"Shift_JIS\"; .foo { }";
+        assert_eq!(
+            extract_charset_from_css(css),
+            Some("shift_jis".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_css_single_quotes() {
+        // @charset 'UTF-8';
+        let css = b"@charset 'UTF-8'; body { color: red; }";
+        assert_eq!(
+            extract_charset_from_css(css),
+            Some("utf-8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_css_with_whitespace() {
+        // @charset  "UTF-8"  ;
+        let css = b"@charset  \"UTF-8\"  ; body { }";
+        assert_eq!(
+            extract_charset_from_css(css),
+            Some("utf-8".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_charset_from_css_no_charset() {
+        let css = b"body { color: red; }";
+        assert_eq!(extract_charset_from_css(css), None);
+    }
+
+    #[test]
+    fn test_extract_charset_from_css_case_insensitive() {
+        // @CHARSET should work
+        let css = b"@CHARSET \"UTF-8\"; .foo { }";
+        assert_eq!(
+            extract_charset_from_css(css),
+            Some("utf-8".to_string())
         );
     }
 }
