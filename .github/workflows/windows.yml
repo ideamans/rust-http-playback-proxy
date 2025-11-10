@@ -6,13 +6,8 @@ on:
       - windows
 
 jobs:
-  test-windows:
-    name: Windows ${{ matrix.test-type }}
-    strategy:
-      fail-fast: false
-      matrix:
-        test-type: [unit, e2e-performance, e2e-content, integration, acceptance-go, acceptance-ts]
-
+  build:
+    name: Build (Windows)
     runs-on: windows-latest
 
     steps:
@@ -24,18 +19,6 @@ jobs:
         with:
           toolchain: stable
           components: rustfmt, clippy
-
-      - name: Setup Go (for acceptance tests)
-        if: matrix.test-type == 'acceptance-go'
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Setup Node.js (for acceptance tests)
-        if: matrix.test-type == 'acceptance-ts'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -57,35 +40,125 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target
-          key: ${{ runner.os }}-${{ matrix.test-type }}-target-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-build-target-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.test-type }}-target-
+            ${{ runner.os }}-build-target-
 
-      - name: Unit tests
-        if: matrix.test-type == 'unit'
+      - name: Lint and format check
         run: |
           cargo fmt --all -- --check
           cargo clippy --all-targets --all-features -- -D warnings
-          cargo test
 
-      - name: Build main binary (for E2E and acceptance tests)
-        if: matrix.test-type != 'unit'
+      - name: Build main binary
         run: cargo build --release
+
+      - name: Build E2E binaries
+        run: |
+          cd e2e/performance
+          cargo build --release
+          cd ../content
+          cargo build --release
+          cd ../minimum
+          cargo build --release
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: |
+            target/release/http-playback-proxy.exe
+            e2e/performance/target/release/performance.exe
+            e2e/content/target/release/content.exe
+            e2e/minimum/target/release/minimum.exe
+          retention-days: 1
+
+  test-windows:
+    name: Windows ${{ matrix.test-type }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        test-type: [unit, e2e-performance, e2e-content, integration, acceptance-go, acceptance-ts]
+
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        if: matrix.test-type == 'unit' || matrix.test-type == 'integration'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Setup Go (for acceptance tests)
+        if: matrix.test-type == 'acceptance-go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Setup Node.js (for acceptance tests)
+        if: matrix.test-type == 'acceptance-ts'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Download binaries
+        if: matrix.test-type != 'unit'
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-binaries
+
+      - name: Cache cargo registry
+        if: matrix.test-type == 'unit' || matrix.test-type == 'integration'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache cargo index
+        if: matrix.test-type == 'unit' || matrix.test-type == 'integration'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-index-
+
+      - name: Cache target directory
+        if: matrix.test-type == 'unit'
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: ${{ runner.os }}-unit-target-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-unit-target-
+
+      - name: Unit tests
+        if: matrix.test-type == 'unit'
+        run: cargo test
 
       - name: E2E Performance Test
         if: matrix.test-type == 'e2e-performance'
         working-directory: e2e/performance
         shell: pwsh
         run: |
-          cargo build --release
-          & ./run.sh
+          # Use downloaded binary
+          & ../../e2e/performance/target/release/performance.exe
         timeout-minutes: 5
 
       - name: E2E Content Test
         if: matrix.test-type == 'e2e-content'
         working-directory: e2e/content
         shell: bash
-        run: ./run.sh
+        run: |
+          # Use downloaded binary
+          chmod +x ../../e2e/content/target/release/content.exe
+          ../../e2e/content/target/release/content.exe
         timeout-minutes: 5
 
       - name: Integration Test
