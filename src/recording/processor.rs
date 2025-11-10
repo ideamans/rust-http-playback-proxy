@@ -210,23 +210,11 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
     #[allow(dead_code)]
     pub fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
         match mime_type.as_deref() {
-            Some("text/html") => {
-                // Use prettyish-html library
-                Ok(prettyish_html::prettify(content).to_string())
-            }
+            Some("text/html") => crate::beautify::format_html(content),
             Some("application/javascript") | Some("text/javascript") => {
-                // Use prettify-js library
-                let (prettified, _source_map) = prettify_js::prettyprint(content);
-                Ok(prettified)
+                crate::beautify::format_javascript(content)
             }
-            Some("text/css") => {
-                // Simple CSS beautification (no library available for current Rust version)
-                let result = content
-                    .replace('{', "{\n")
-                    .replace('}', "\n}\n")
-                    .replace(';', ";\n");
-                Ok(result)
-            }
+            Some("text/css") => crate::beautify::format_css(content),
             _ => Ok(content.to_string()),
         }
     }

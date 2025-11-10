@@ -111,7 +111,7 @@ mod utils_tests {
         assert!(result.starts_with("get/https/example.com/test~"));
 
         // Test very long query
-        let query_long = "param=".to_string() + &"x".repeat(100);
+        let query_long = format!("param={}", "x".repeat(100));
         let url = format!("https://example.com/api/endpoint?{}", query_long);
         let result = generate_file_path_from_url(&url, "GET").unwrap();
         assert!(result.contains(".~"));

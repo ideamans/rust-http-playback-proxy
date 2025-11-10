@@ -384,6 +384,7 @@ async fn start_mock_server(port: u16) -> Result<()> {
 fn start_recording_proxy(
     entry_url: &str,
     proxy_port: u16,
+    control_port: u16,
     inventory_dir: &PathBuf,
 ) -> Result<Child> {
     // Use CARGO_MANIFEST_DIR to get workspace root
@@ -417,6 +418,8 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
+                .arg("--control-port")
+                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -429,6 +432,8 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
+            .arg("--control-port")
+            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -454,6 +459,8 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
+                .arg("--control-port")
+                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -473,6 +480,8 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
+            .arg("--control-port")
+            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -841,6 +850,16 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
+    // Convert inventory_dir to absolute path to ensure child process can access it
+    let absolute_inventory_dir = if inventory_dir.is_absolute() {
+        inventory_dir.clone()
+    } else {
+        std::env::current_dir()?.join(inventory_dir)
+    };
+
+    info!("start_playback_proxy: inventory_dir = {:?}", inventory_dir);
+    info!("start_playback_proxy: absolute_inventory_dir = {:?}", absolute_inventory_dir);
+
     // Check if binary exists - prefer using binary over cargo run
     // This is important because cargo run doesn't properly forward SIGINT to child process
     let binary_path = repo_root.join("target/release/http-playback-proxy");
@@ -861,7 +880,9 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
             .arg("--port")
             .arg(proxy_port.to_string())
             .arg("--inventory")
-            .arg(inventory_dir.to_str().unwrap())
+            .arg(absolute_inventory_dir.to_str().unwrap())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .spawn()?
     } else {
         // Local: Use cargo run
@@ -880,7 +901,9 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
             .arg("--port")
             .arg(proxy_port.to_string())
             .arg("--inventory")
-            .arg(inventory_dir.to_str().unwrap())
+            .arg(absolute_inventory_dir.to_str().unwrap())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .spawn()?
     };
 
@@ -895,12 +918,45 @@ async fn verify_playback_proxy(
     mock_server_port: u16,
 ) -> Result<()> {
     info!("\n--- Verifying Playback Charset/Encoding Reproduction ---");
+    info!("Inventory directory: {:?}", inventory_dir);
+    info!("Playback proxy port: {}", playback_proxy_port);
+
+    // Double-check inventory directory exists before starting playback proxy
+    info!("Pre-check: inventory_dir exists? {}", inventory_dir.exists());
+    if inventory_dir.exists() {
+        info!("Pre-check: inventory_dir is a directory? {}", inventory_dir.is_dir());
+        info!("Pre-check: inventory_dir path: {:?}", inventory_dir);
+
+        // List files
+        if let Ok(entries) = std::fs::read_dir(inventory_dir) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    info!("  Pre-check file: {:?}", entry.path());
+                }
+            }
+        }
+    }
 
     // Start playback proxy
     let mut playback_proxy = start_playback_proxy(playback_proxy_port, inventory_dir)?;
+    info!("Playback proxy started with PID: {}", playback_proxy.id());
+
+    // Give child process time to actually start before waiting for port
+    sleep(Duration::from_millis(500)).await;
+    info!("After 500ms sleep, checking if playback proxy process is still alive...");
+    match playback_proxy.try_wait()? {
+        Some(status) => {
+            anyhow::bail!("Playback proxy exited immediately with status: {:?}", status);
+        }
+        None => {
+            info!("✓ Playback proxy process is still running");
+        }
+    }
 
     // Wait for playback proxy to start
+    info!("Waiting for playback proxy to be ready...");
     wait_for_proxy(playback_proxy_port, 30).await?;
+    info!("✓ Playback proxy is ready");
 
     let client = reqwest::Client::builder()
         .proxy(reqwest::Proxy::http(format!(
@@ -1046,12 +1102,13 @@ async fn main() -> Result<()> {
 
     // Use 127.0.0.1 consistently to avoid IPv6/IPv4 mismatch on CI runners
     const MOCK_SERVER_HOST: &str = "127.0.0.1";
+    const RECORDING_CONTROL_PORT: u16 = 18083;
     let mock_server_port = 18080;
     let recording_proxy_port = 18081;
 
     // Start mock HTTP server
     info!("\nStarting mock HTTP server on {}:{}", MOCK_SERVER_HOST, mock_server_port);
-    tokio::spawn(async move {
+    let mock_server_handle = tokio::spawn(async move {
         if let Err(e) = start_mock_server(mock_server_port).await {
             error!("Mock server error: {:?}", e);
         }
@@ -1062,8 +1119,10 @@ async fn main() -> Result<()> {
     wait_for_proxy(mock_server_port, 30).await?;
 
     // Create temporary inventory directory
-    let temp_dir = tempfile::tempdir()?;
-    let inventory_dir = temp_dir.path().to_path_buf();
+    // IMPORTANT: Keep _temp_dir alive until the end of the function
+    // to prevent automatic cleanup of the temporary directory
+    let _temp_dir = tempfile::tempdir()?;
+    let inventory_dir = _temp_dir.path().to_path_buf();
     info!("Using inventory directory: {:?}", inventory_dir);
 
     // === Phase 1: Recording ===
@@ -1071,7 +1130,7 @@ async fn main() -> Result<()> {
 
     let entry_url = format!("http://{}:{}/", MOCK_SERVER_HOST, mock_server_port);
     let mut recording_proxy =
-        start_recording_proxy(&entry_url, recording_proxy_port, &inventory_dir)?;
+        start_recording_proxy(&entry_url, recording_proxy_port, RECORDING_CONTROL_PORT, &inventory_dir)?;
 
     // Wait for proxy to start (with retry logic for CI environments where build takes time)
     wait_for_proxy(recording_proxy_port, 60).await?;
@@ -1118,46 +1177,66 @@ async fn main() -> Result<()> {
 
     info!("\nAll requests completed");
 
-    // Send SIGINT to recording proxy for graceful shutdown
-    info!("\nStopping recording proxy");
-    #[cfg(unix)]
-    {
-        unsafe {
-            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+    // Send shutdown request via control port for graceful shutdown
+    info!("\nStopping recording proxy via control port");
+    let shutdown_url = format!("http://127.0.0.1:{}/_shutdown", RECORDING_CONTROL_PORT);
+    match reqwest::Client::new().post(&shutdown_url).send().await {
+        Ok(_) => {
+            info!("Shutdown request sent successfully");
         }
-        // Wait for graceful shutdown
-        // The proxy needs time to:
-        // 1. Wait 1 second for in-flight requests
-        // 2. Save inventory
-        // 3. Wait up to 10 seconds for content files to be written
-        // Total: up to 12 seconds
-        sleep(Duration::from_secs(15)).await;
-        let _ = recording_proxy.wait();
-    }
-    #[cfg(windows)]
-    {
-        // Windows: Send Ctrl+Break event for graceful shutdown
-        const CTRL_BREAK_EVENT: u32 = 1;
-
-        unsafe {
-            #[link(name = "kernel32")]
-            extern "system" {
-                fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
+        Err(e) => {
+            info!("Failed to send shutdown request: {:?}, falling back to SIGINT", e);
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(recording_proxy.id() as i32, libc::SIGINT);
             }
-
-            let result = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, recording_proxy.id());
-            if result != 0 {
-                info!("Sent Ctrl+Break event, waiting for graceful shutdown");
-                // The proxy needs time to save inventory and content files (up to 12 seconds)
-                sleep(Duration::from_secs(15)).await;
-                let _ = recording_proxy.wait();
-            } else {
-                info!("Failed to send Ctrl+Break, force killing");
+            #[cfg(windows)]
+            {
                 let _ = recording_proxy.kill();
-                let _ = recording_proxy.wait();
             }
         }
     }
+
+    // Wait for index.json to be created (with timeout)
+    info!("Waiting for index.json to be created...");
+    let index_path = inventory_dir.join("index.json");
+    let max_wait = Duration::from_secs(30);
+    let start = std::time::Instant::now();
+
+    loop {
+        if index_path.exists() {
+            info!("✓ index.json created successfully");
+            break;
+        }
+
+        if start.elapsed() > max_wait {
+            anyhow::bail!(
+                "Timeout waiting for index.json to be created. Recording proxy may have failed to shutdown gracefully."
+            );
+        }
+
+        // Check if process is still alive
+        match recording_proxy.try_wait()? {
+            Some(status) => {
+                if !index_path.exists() {
+                    anyhow::bail!(
+                        "Recording proxy exited with status {:?} but index.json was not created",
+                        status
+                    );
+                }
+                info!("✓ Recording proxy exited with status: {:?}", status);
+                break;
+            }
+            None => {
+                // Process still running, wait a bit
+                sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+
+    // Wait a bit more to ensure all content files are written
+    info!("Waiting for content files to be written...");
+    sleep(Duration::from_secs(2)).await;
 
     // === Phase 2: Verification ===
     info!("\n--- Phase 2: Verification ---");
@@ -1172,7 +1251,55 @@ async fn main() -> Result<()> {
     verify_charset_in_inventory(&inventory_dir)?;
 
     // === Phase 3: Playback Verification ===
-    info!("\n--- Phase 3: Playback ---");
+    // IMPORTANT: We stop the mock server BEFORE starting playback proxy
+    // to ensure we're testing actual playback, not fallback to original server
+    info!("\n--- Phase 3: Playback (with original server stopped) ---");
+
+    // Debug: Check inventory directory before stopping mock server
+    info!("Checking inventory directory: {:?}", inventory_dir);
+
+    // List all files in inventory directory
+    match std::fs::read_dir(&inventory_dir) {
+        Ok(entries) => {
+            info!("Files in inventory directory:");
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    info!("  - {:?}", entry.path());
+                }
+            }
+        }
+        Err(e) => {
+            anyhow::bail!("Failed to read inventory directory: {:?}", e);
+        }
+    }
+
+    let index_path = inventory_dir.join("index.json");
+    if !index_path.exists() {
+        anyhow::bail!("index.json not found at {:?}", index_path);
+    }
+    info!("✓ index.json exists");
+
+    let contents_dir = inventory_dir.join("contents");
+    if !contents_dir.exists() {
+        anyhow::bail!("contents directory not found at {:?}", contents_dir);
+    }
+    info!("✓ contents directory exists");
+
+    info!("Stopping mock server to ensure playback proxy is actually working...");
+    mock_server_handle.abort();
+
+    // Wait a bit to ensure port is released
+    sleep(Duration::from_secs(1)).await;
+
+    // Verify mock server is actually stopped by trying to connect
+    match tokio::net::TcpStream::connect(format!("{}:{}", MOCK_SERVER_HOST, mock_server_port)).await {
+        Ok(_) => {
+            anyhow::bail!("Mock server is still running on port {}! Cannot verify playback.", mock_server_port);
+        }
+        Err(_) => {
+            info!("✓ Mock server stopped successfully");
+        }
+    }
 
     let playback_proxy_port = 18082;
     verify_playback_proxy(&inventory_dir, playback_proxy_port, MOCK_SERVER_HOST, mock_server_port).await?;
@@ -1186,5 +1313,6 @@ async fn main() -> Result<()> {
     info!("✓ Combination tests");
     info!("✓ Playback verification");
 
+    // _temp_dir will be automatically dropped here, cleaning up the temporary directory
     Ok(())
 }
