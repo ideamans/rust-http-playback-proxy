@@ -42,8 +42,8 @@ struct Resource {
     url: String,
     #[serde(rename = "ttfbMs")]
     ttfb_ms: Option<u64>,
-    #[serde(rename = "downloadEndMs")]
-    download_end_ms: Option<u64>,
+    #[serde(rename = "durationMs")]
+    duration_ms: Option<u64>,
     mbps: Option<f64>,
 }
 
@@ -485,9 +485,8 @@ fn verify_inventory(
             let expected_transfer_duration_ms = test_resource.transfer_duration_ms;
 
             let recorded_ttfb_ms = resource.ttfb_ms.unwrap_or(0);
-            let recorded_download_end_ms = resource.download_end_ms.unwrap_or(0);
-            // Calculate transfer duration from downloadEndMs - ttfbMs (both are absolute times)
-            let recorded_transfer_duration_ms = recorded_download_end_ms.saturating_sub(recorded_ttfb_ms);
+            // duration_ms already represents the transfer duration
+            let recorded_transfer_duration_ms = resource.duration_ms.unwrap_or(0);
 
             info!(
                 "Resource {}: TTFB recorded={}ms expected={}ms, Transfer duration recorded={}ms expected={}ms",

@@ -174,7 +174,7 @@ impl HttpHandler for RecordingHandler {
                 }
             };
 
-            let (method_str, url, ttfb_ms, download_end_ms) = if let Some(info) = request_info {
+            let (method_str, url, ttfb_ms, duration_ms) = if let Some(info) = request_info {
                 // Calculate TTFB relative to request start (pure TTFB duration)
                 let ttfb = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
                 // Store only the pure TTFB, not the absolute time
@@ -185,12 +185,15 @@ impl HttpHandler for RecordingHandler {
                 let download_end_ms =
                     download_end.duration_since(info.request_start).as_millis() as u64;
 
+                // Calculate duration from TTFB to download end
+                let duration_ms = download_end_ms.saturating_sub(ttfb_ms);
+
                 info!(
-                    "Matched response with request: {} {} (TTFB: {}ms, download_end: {}ms, request offset: {}ms)",
-                    info.method, info.url, ttfb, download_end_ms, info.elapsed_since_start
+                    "Matched response with request: {} {} (TTFB: {}ms, duration: {}ms, request offset: {}ms)",
+                    info.method, info.url, ttfb, duration_ms, info.elapsed_since_start
                 );
 
-                (info.method, info.url, ttfb_ms, download_end_ms)
+                (info.method, info.url, ttfb_ms, duration_ms)
             } else {
                 // Fallback - this should rarely happen with connection-based FIFO
                 error!("No matching request info found for client: {}", client_addr);
@@ -198,11 +201,12 @@ impl HttpHandler for RecordingHandler {
                 let download_end = Instant::now();
                 let download_end_elapsed =
                     download_end.duration_since(*start_time).as_millis() as u64;
+                let duration = download_end_elapsed.saturating_sub(elapsed);
                 (
                     "GET".to_string(),
                     "unknown".to_string(),
                     elapsed,
-                    download_end_elapsed,
+                    duration,
                 )
             };
 
@@ -210,7 +214,7 @@ impl HttpHandler for RecordingHandler {
             let mut resource = Resource::new(method_str, url.clone());
             resource.status_code = Some(status.as_u16());
             resource.ttfb_ms = ttfb_ms;
-            resource.download_end_ms = Some(download_end_ms);
+            resource.duration_ms = Some(duration_ms);
 
             // Store response headers
             // Multiple headers with the same name (like Set-Cookie) are collected into arrays

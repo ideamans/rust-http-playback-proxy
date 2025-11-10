@@ -110,12 +110,12 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
         return Ok((chunks, 0));
     }
 
-    // Use actual recorded transfer duration (download_end_ms - ttfb_ms)
+    // Use actual recorded transfer duration (duration_ms)
     // This ensures we reproduce the exact timing from the recording
-    let transfer_duration_ms = if let Some(download_end_ms) = resource.download_end_ms {
-        download_end_ms.saturating_sub(resource.ttfb_ms)
+    let transfer_duration_ms = if let Some(duration_ms) = resource.duration_ms {
+        duration_ms
     } else {
-        // Fallback: calculate from mbps if download_end_ms is not available
+        // Fallback: calculate from mbps if duration_ms is not available
         let mbps = resource.mbps.unwrap_or(TARGET_MBPS);
         let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0;
         (total_size as f64 / bytes_per_ms) as u64
