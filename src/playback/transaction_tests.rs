@@ -293,6 +293,15 @@ mod tests {
         resource.status_code = Some(200);
         resource.ttfb_ms = 100;
 
+        // Set raw_headers with Content-Type that includes charset
+        use std::collections::HashMap;
+        let mut raw_headers = HashMap::new();
+        raw_headers.insert(
+            "content-type".to_string(),
+            crate::types::HeaderValue::Single("text/html; charset=Shift_JIS".to_string()),
+        );
+        resource.raw_headers = Some(raw_headers);
+
         let transaction = convert_resource_to_transaction(&resource, &inventory_dir, mock_fs)
             .await
             .unwrap();

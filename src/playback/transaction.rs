@@ -84,21 +84,10 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
         crate::types::HeaderValue::Single(final_content.len().to_string()),
     );
 
-    // Update charset in Content-Type header if available
-    if let Some(mime_type) = &resource.content_type_mime {
-        let charset_to_use = resource.content_charset.as_ref();
-
-        let content_type_value = if let Some(charset) = charset_to_use {
-            format!("{}; charset={}", mime_type, charset)
-        } else {
-            mime_type.clone()
-        };
-
-        headers.insert(
-            "content-type".to_string(),
-            crate::types::HeaderValue::Single(content_type_value),
-        );
-    }
+    // NOTE: We do NOT modify Content-Type header here.
+    // The original Content-Type from raw_headers is preserved exactly as recorded.
+    // The content_charset field is only used for re-encoding the body content (done above),
+    // NOT for modifying HTTP headers.
 
     Ok(Some(Transaction {
         method: resource.method.clone(),
