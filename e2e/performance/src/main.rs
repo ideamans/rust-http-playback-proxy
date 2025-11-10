@@ -557,7 +557,7 @@ async fn main() -> Result<()> {
     // Start mock HTTP server
     info!("Starting mock HTTP server on port {}", mock_server_port);
     let server_resources = resources.clone();
-    tokio::spawn(async move {
+    let mock_server_handle = tokio::spawn(async move {
         if let Err(e) = start_mock_server(mock_server_port, server_resources).await {
             error!("Mock server error: {:?}", e);
         }
@@ -633,6 +633,29 @@ async fn main() -> Result<()> {
     // TODO: Fix inventory verification - there seems to be an issue with request/response matching in parallel requests
     // verify_inventory(&inventory_dir, &resources, tolerance)?;
     info!("Inventory verification skipped (pending fix for parallel request matching)");
+
+    // Stop mock server before playback to ensure playback is being tested, not fallback
+    info!("\n=== Stopping mock server ===");
+    info!("Aborting mock server task...");
+    mock_server_handle.abort();
+    sleep(Duration::from_millis(500)).await;
+
+    // Verify mock server is actually stopped by attempting connection
+    info!("Verifying mock server is stopped on port {}...", mock_server_port);
+    match tokio::time::timeout(
+        Duration::from_millis(500),
+        tokio::net::TcpStream::connect(format!("127.0.0.1:{}", mock_server_port)),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {
+            error!("Mock server is still running! This should not happen.");
+            anyhow::bail!("Mock server should be stopped but is still accepting connections");
+        }
+        Ok(Err(_)) | Err(_) => {
+            info!("✓ Mock server is stopped (connection refused as expected)");
+        }
+    }
 
     // === Phase 2: Playback ===
     info!("\n=== Phase 2: Playback ===");
