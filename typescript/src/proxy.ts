@@ -14,19 +14,20 @@ export class Proxy {
   public readonly deviceType?: string;
 
   private _port: number;
-  private _mgmtPort: number;
+  private _controlPort?: number;
   private process?: ChildProcess;
 
   constructor(
     mode: ProxyMode,
     port: number,
     inventoryDir: string,
+    controlPort?: number,
     entryUrl?: string,
     deviceType?: string
   ) {
     this.mode = mode;
     this._port = port;
-    this._mgmtPort = port + 1; // Management API is on proxy_port + 1
+    this._controlPort = controlPort;
     this.inventoryDir = inventoryDir;
     this.entryUrl = entryUrl;
     this.deviceType = deviceType;
@@ -40,10 +41,10 @@ export class Proxy {
   }
 
   /**
-   * Get the management API port number
+   * Get the control API port number (if enabled)
    */
-  get mgmtPort(): number {
-    return this._mgmtPort;
+  get controlPort(): number | undefined {
+    return this._controlPort;
   }
 
   /**
@@ -51,7 +52,13 @@ export class Proxy {
    */
   updatePort(port: number): void {
     this._port = port;
-    this._mgmtPort = port + 1;
+  }
+
+  /**
+   * Update the control port number (used internally when OS assigns a port)
+   */
+  updateControlPort(controlPort: number): void {
+    this._controlPort = controlPort;
   }
 
   /**
@@ -63,7 +70,7 @@ export class Proxy {
 
   /**
    * Stop the proxy gracefully
-   * Sends shutdown request via management API (cross-platform)
+   * Sends shutdown request via control API if available, otherwise uses SIGTERM
    */
   async stop(): Promise<void> {
     if (!this.process) {
@@ -96,32 +103,41 @@ export class Proxy {
         }
       });
 
-      // Send shutdown request via management API
-      const http = require('http');
-      const req = http.request(
-        {
-          hostname: '127.0.0.1',
-          port: this._mgmtPort,
-          path: '/_shutdown',
-          method: 'POST',
-        },
-        (res: any) => {
-          // Response received, proxy should be shutting down
-          res.resume(); // Consume response
-        }
-      );
+      // Send shutdown request via control API if enabled
+      if (this._controlPort) {
+        const http = require('http');
+        const req = http.request(
+          {
+            hostname: '127.0.0.1',
+            port: this._controlPort,
+            path: '/_shutdown',
+            method: 'POST',
+          },
+          (res: any) => {
+            // Response received, proxy should be shutting down
+            res.resume(); // Consume response
+          }
+        );
 
-      req.on('error', (err: Error) => {
-        // If HTTP request fails, fall back to SIGTERM
-        console.warn(`HTTP shutdown failed: ${err.message}, falling back to SIGTERM`);
+        req.on('error', (err: Error) => {
+          // If HTTP request fails, fall back to SIGTERM
+          console.warn(`HTTP shutdown failed: ${err.message}, falling back to SIGTERM`);
+          try {
+            this.process?.kill('SIGTERM');
+          } catch {
+            // Ignore if already dead
+          }
+        });
+
+        req.end();
+      } else {
+        // No control port, use SIGTERM directly
         try {
-          this.process?.kill('SIGTERM');
+          this.process.kill('SIGTERM');
         } catch {
           // Ignore if already dead
         }
-      });
-
-      req.end();
+      }
     });
   }
 
@@ -203,6 +219,12 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
+  // Add control port if specified
+  const controlPort = options.controlPort;
+  if (controlPort !== undefined) {
+    args.push('--control-port', controlPort.toString());
+  }
+
   // Start the process with piped stdout to capture port info
   const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -215,7 +237,7 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
 
   const proc = spawn(binaryPath, args, spawnOptions);
 
-  const proxy = new Proxy('recording', port, inventoryDir, options.entryUrl, deviceType);
+  const proxy = new Proxy('recording', port, inventoryDir, controlPort, options.entryUrl, deviceType);
   proxy.setProcess(proc);
 
   // Capture stdout to extract actual port number when using port 0
@@ -292,6 +314,12 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
+  // Add control port if specified
+  const controlPort = options.controlPort;
+  if (controlPort !== undefined) {
+    args.push('--control-port', controlPort.toString());
+  }
+
   // Start the process with piped stdout to capture port info
   const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -304,7 +332,7 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
 
   const proc = spawn(binaryPath, args, spawnOptions);
 
-  const proxy = new Proxy('playback', port, inventoryDir);
+  const proxy = new Proxy('playback', port, inventoryDir, controlPort);
   proxy.setProcess(proc);
 
   // Capture stdout to extract actual port number when using port 0

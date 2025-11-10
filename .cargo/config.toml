@@ -1,0 +1,10 @@
+# Cargo configuration for http-playback-proxy
+
+[build]
+# Integration tests should run single-threaded to avoid port conflicts
+# and timing issues between parallel test executions
+
+[test]
+# NOTE: This setting is not standard cargo config
+# Use `cargo test -- --test-threads=1` explicitly for integration tests
+# or set RUST_TEST_THREADS=1 environment variable

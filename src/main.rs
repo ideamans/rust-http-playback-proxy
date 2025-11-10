@@ -21,11 +21,16 @@ async fn main() -> anyhow::Result<()> {
             port,
             device,
             inventory,
+            control_port,
         } => {
-            recording::run_recording_mode(entry_url, port, device, inventory).await?;
+            recording::run_recording_mode(entry_url, port, device, inventory, control_port).await?;
         }
-        Commands::Playback { port, inventory } => {
-            playback::run_playback_mode(port, inventory).await?;
+        Commands::Playback {
+            port,
+            inventory,
+            control_port,
+        } => {
+            playback::run_playback_mode(port, inventory, control_port).await?;
         }
     }
 

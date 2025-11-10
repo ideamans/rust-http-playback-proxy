@@ -85,12 +85,16 @@ func TestAcceptance(t *testing.T) {
 func testRecording(t *testing.T, serverURL string, inventoryDir string) {
 	t.Log("Starting recording proxy...")
 
+	// Use random control port for graceful HTTP shutdown
+	controlPort := 20000 + (os.Getpid() % 1000)
+
 	// Start recording proxy
 	p, err := proxy.StartRecording(proxy.RecordingOptions{
 		EntryURL:     serverURL,
 		Port:         0, // Use default port
 		DeviceType:   proxy.DeviceTypeMobile,
 		InventoryDir: inventoryDir,
+		ControlPort:  &controlPort, // Enable HTTP shutdown
 	})
 	if err != nil {
 		t.Fatalf("Failed to start recording proxy: %v", err)
@@ -101,7 +105,7 @@ func testRecording(t *testing.T, serverURL string, inventoryDir string) {
 		}
 	}()
 
-	t.Logf("Recording proxy started on port %d", p.Port)
+	t.Logf("Recording proxy started on port %d, control port %d", p.Port, *p.ControlPort)
 
 	// Wait for proxy to be ready
 	time.Sleep(1 * time.Second)

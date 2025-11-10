@@ -9,13 +9,13 @@ import (
 )
 
 var (
-	kernel32                  = syscall.NewLazyDLL("kernel32.dll")
+	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
 	procGenerateConsoleCtrlEvent = kernel32.NewProc("GenerateConsoleCtrlEvent")
 )
 
 const (
-	CTRL_C_EVENT        = 0
-	CTRL_BREAK_EVENT    = 1
+	CTRL_C_EVENT     = 0
+	CTRL_BREAK_EVENT = 1
 )
 
 // setProcAttributes sets Windows-specific process attributes

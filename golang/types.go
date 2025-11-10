@@ -27,27 +27,27 @@ const (
 
 // Resource represents a single HTTP resource in the inventory
 type Resource struct {
-	Method              string               `json:"method"`
-	URL                 string               `json:"url"`
-	TtfbMs              uint64               `json:"ttfbMs"`
-	Mbps                *float64             `json:"mbps,omitempty"`
-	StatusCode          *uint16              `json:"statusCode,omitempty"`
-	ErrorMessage        *string              `json:"errorMessage,omitempty"`
-	RawHeaders          map[string]string    `json:"rawHeaders,omitempty"`
-	ContentEncoding     *ContentEncodingType `json:"contentEncoding,omitempty"`
-	ContentTypeMime     *string              `json:"contentTypeMime,omitempty"`
-	ContentTypeCharset  *string              `json:"contentTypeCharset,omitempty"`
-	ContentFilePath     *string              `json:"contentFilePath,omitempty"`
-	ContentUtf8         *string              `json:"contentUtf8,omitempty"`
-	ContentBase64       *string              `json:"contentBase64,omitempty"`
-	Minify              *bool                `json:"minify,omitempty"`
+	Method             string               `json:"method"`
+	URL                string               `json:"url"`
+	TtfbMs             uint64               `json:"ttfbMs"`
+	Mbps               *float64             `json:"mbps,omitempty"`
+	StatusCode         *uint16              `json:"statusCode,omitempty"`
+	ErrorMessage       *string              `json:"errorMessage,omitempty"`
+	RawHeaders         map[string]string    `json:"rawHeaders,omitempty"`
+	ContentEncoding    *ContentEncodingType `json:"contentEncoding,omitempty"`
+	ContentTypeMime    *string              `json:"contentTypeMime,omitempty"`
+	ContentTypeCharset *string              `json:"contentTypeCharset,omitempty"`
+	ContentFilePath    *string              `json:"contentFilePath,omitempty"`
+	ContentUtf8        *string              `json:"contentUtf8,omitempty"`
+	ContentBase64      *string              `json:"contentBase64,omitempty"`
+	Minify             *bool                `json:"minify,omitempty"`
 }
 
 // Inventory represents the complete inventory of recorded resources
 type Inventory struct {
-	EntryURL   *string      `json:"entryUrl,omitempty"`
-	DeviceType *DeviceType  `json:"deviceType,omitempty"`
-	Resources  []Resource   `json:"resources"`
+	EntryURL   *string     `json:"entryUrl,omitempty"`
+	DeviceType *DeviceType `json:"deviceType,omitempty"`
+	Resources  []Resource  `json:"resources"`
 }
 
 // LoadInventory loads an inventory from a JSON file
