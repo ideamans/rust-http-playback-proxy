@@ -392,11 +392,17 @@ fn start_recording_proxy(
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
-    // Check if we're in CI environment (binary should be pre-built)
-    let use_prebuilt = std::env::var("CI").is_ok();
+    // Check if binary exists - prefer using binary over cargo run
+    // This is important because cargo run doesn't properly forward SIGINT to child process
+    let binary_path = repo_root.join("target/release/http-playback-proxy");
+    #[cfg(windows)]
+    let binary_path = binary_path.with_extension("exe");
+
+    // Use pre-built binary if in CI or if binary exists
+    let use_prebuilt = std::env::var("CI").is_ok() || binary_path.exists();
 
     let child = if use_prebuilt {
-        // CI: Use pre-built binary directly
+        // CI or Local with binary: Use pre-built binary directly
         let binary_path = repo_root.join("target/release/http-playback-proxy");
         #[cfg(windows)]
         let binary_path = binary_path.with_extension("exe");
@@ -835,11 +841,17 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
-    // Check if we're in CI environment (binary should be pre-built)
-    let use_prebuilt = std::env::var("CI").is_ok();
+    // Check if binary exists - prefer using binary over cargo run
+    // This is important because cargo run doesn't properly forward SIGINT to child process
+    let binary_path = repo_root.join("target/release/http-playback-proxy");
+    #[cfg(windows)]
+    let binary_path = binary_path.with_extension("exe");
+
+    // Use pre-built binary if in CI or if binary exists
+    let use_prebuilt = std::env::var("CI").is_ok() || binary_path.exists();
 
     let child = if use_prebuilt {
-        // CI: Use pre-built binary directly
+        // CI or Local with binary: Use pre-built binary directly
         let binary_path = repo_root.join("target/release/http-playback-proxy");
         #[cfg(windows)]
         let binary_path = binary_path.with_extension("exe");
@@ -1114,7 +1126,12 @@ async fn main() -> Result<()> {
             libc::kill(recording_proxy.id() as i32, libc::SIGINT);
         }
         // Wait for graceful shutdown
-        sleep(Duration::from_secs(3)).await;
+        // The proxy needs time to:
+        // 1. Wait 1 second for in-flight requests
+        // 2. Save inventory
+        // 3. Wait up to 10 seconds for content files to be written
+        // Total: up to 12 seconds
+        sleep(Duration::from_secs(15)).await;
         let _ = recording_proxy.wait();
     }
     #[cfg(windows)]
@@ -1131,7 +1148,8 @@ async fn main() -> Result<()> {
             let result = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, recording_proxy.id());
             if result != 0 {
                 info!("Sent Ctrl+Break event, waiting for graceful shutdown");
-                sleep(Duration::from_secs(3)).await;
+                // The proxy needs time to save inventory and content files (up to 12 seconds)
+                sleep(Duration::from_secs(15)).await;
                 let _ = recording_proxy.wait();
             } else {
                 info!("Failed to send Ctrl+Break, force killing");
