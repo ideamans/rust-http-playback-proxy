@@ -1,6 +1,6 @@
 {
-  "name": "http-playback-proxy",
-  "version": "0.2.0",
+  "name": "rust-http-playback-proxy",
+  "version": "0.2.0-r1",
   "description": "HTTP traffic recording and playback proxy with precise timing control for PageSpeed optimization and performance testing",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -39,12 +39,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pagespeed-quest/http-playback-proxy.git",
+    "url": "https://github.com/ideamans/rust-http-playback-proxy.git",
     "directory": "typescript"
   },
-  "homepage": "https://github.com/pagespeed-quest/http-playback-proxy#readme",
+  "homepage": "https://github.com/ideamans/rust-http-playback-proxy#readme",
   "bugs": {
-    "url": "https://github.com/pagespeed-quest/http-playback-proxy/issues"
+    "url": "https://github.com/ideamans/rust-http-playback-proxy/issues"
   },
   "dependencies": {
     "tar": "^7.0.0"

@@ -1,478 +1,552 @@
 # HTTP Playback Proxy
 
-Rustで実装されたHTTPトラフィックの録画・再生プロキシサーバー。Webページの読み込み性能を測定・分析するためのツールです。
+[日本語](./README_ja.md) | English
 
-## 概要
+[![CI](https://github.com/pagespeed-quest/http-playback-proxy/actions/workflows/ci.yml/badge.svg)](https://github.com/pagespeed-quest/http-playback-proxy/actions/workflows/ci.yml)
+[![Release](https://github.com/pagespeed-quest/http-playback-proxy/actions/workflows/release.yml/badge.svg)](https://github.com/pagespeed-quest/http-playback-proxy/actions/workflows/release.yml)
 
-このプログラムは、HTTPリクエスト/レスポンスを録画し、後で同じタイミングで再生することができるMITMプロキシです。PageSpeed最適化やパフォーマンステストに使用できます。
+An MITM HTTP/HTTPS proxy for recording and replaying web traffic with precise timing control. Designed for PageSpeed optimization, performance testing, and automated web performance analysis.
 
-### 主な機能
+## Features
 
-- **録画モード**: HTTPプロキシとしてトラフィックを録画
-- **再生モード**: 録画したトラフィックを同じタイミングで再生
-- **HTTPS対応**: 自己署名証明書による HTTPS プロキシ（証明書エラーは無視）
-- **レスポンス処理**: 圧縮解除、文字エンコーディング変換、Minify/Beautify
-- **タイミング制御**: TTFB（Time To First Byte）と転送速度の再現
+- **Recording Mode**: Capture HTTP/HTTPS traffic as MITM proxy with timing metadata
+- **Playback Mode**: Replay recorded traffic with accurate TTFB and transfer duration simulation
+- **Content Processing**: Automatic beautification of minified HTML/CSS/JS for editability
+- **HTTPS Support**: Transparent HTTPS proxy using self-signed certificates
+- **Timing Accuracy**: ±10% timing precision for TTFB and transfer duration
+- **Multi-Platform**: Supports macOS (ARM64/x86_64), Linux (x86_64/ARM64), Windows (x86_64)
+- **Language Wrappers**: Go and TypeScript/Node.js bindings for easy integration
 
-## 使用技術
+## Quick Start
 
-- **言語**: Rust 2024 Edition
-- **非同期ランタイム**: Tokio
-- **HTTP**: Hyper, Reqwest
-- **CLI**: Clap
-- **シリアライゼーション**: Serde (JSON)
-- **圧縮**: flate2, brotli
-- **その他**: tracing, anyhow, tempfile
+### Using Pre-built Binaries
 
-## インストール
-
-### Rustバイナリから
+Download from [GitHub Releases](https://github.com/pagespeed-quest/http-playback-proxy/releases):
 
 ```bash
-git clone <repository-url>
-cd rust-http-playback-proxy
+# macOS ARM64
+curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/download/http-playback-proxy-darwin-arm64.tar.gz | tar xz
+
+# Linux x86_64
+curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/download/http-playback-proxy-linux-amd64.tar.gz | tar xz
+
+# Windows x86_64
+# Download http-playback-proxy-windows-amd64.zip and extract
+```
+
+### Command Line Usage
+
+#### Recording Mode
+
+**Basic recording (auto-searches port from 8080):**
+```bash
+./http-playback-proxy recording https://example.com
+```
+
+**Full options:**
+```bash
+./http-playback-proxy recording https://example.com \
+  --port 8080 \              # Proxy port (default: 8080, auto-search if occupied)
+  --device mobile \           # Device type: mobile or desktop (default: mobile)
+  --inventory ./my-session    # Output directory (default: ./inventory)
+```
+
+**Recording workflow:**
+1. Start proxy: `./http-playback-proxy recording https://example.com`
+2. Configure browser proxy to `127.0.0.1:8080` (or displayed port)
+3. Visit website in browser
+4. Press `Ctrl+C` to stop and save recording
+5. Check `./inventory/inventory.json` and `./inventory/contents/`
+
+**Manual browsing (no entry URL):**
+```bash
+# Start proxy and browse manually
+./http-playback-proxy recording --port 8080
+```
+
+#### Playback Mode
+
+**Basic playback:**
+```bash
+./http-playback-proxy playback --inventory ./my-session
+```
+
+**Full options:**
+```bash
+./http-playback-proxy playback \
+  --port 8080 \               # Proxy port (default: 8080, auto-search if occupied)
+  --inventory ./my-session    # Recorded data directory (default: ./inventory)
+```
+
+**Playback workflow:**
+1. Start proxy: `./http-playback-proxy playback --inventory ./my-session`
+2. Configure browser proxy to `127.0.0.1:8080` (or displayed port)
+3. Visit same website - responses match recorded timing (±10%)
+4. Press `Ctrl+C` to stop
+
+#### Browser Proxy Configuration
+
+**Chrome/Chromium:**
+```bash
+# macOS/Linux
+google-chrome --proxy-server="127.0.0.1:8080"
+
+# Windows
+chrome.exe --proxy-server="127.0.0.1:8080"
+```
+
+**Firefox:**
+Settings → Network Settings → Manual proxy configuration:
+- HTTP Proxy: `127.0.0.1`, Port: `8080`
+- Check "Also use this proxy for HTTPS"
+
+**System-wide (macOS):**
+```bash
+# Set proxy
+networksetup -setwebproxy Wi-Fi 127.0.0.1 8080
+networksetup -setsecurewebproxy Wi-Fi 127.0.0.1 8080
+
+# Unset proxy
+networksetup -setwebproxystate Wi-Fi off
+networksetup -setsecurewebproxystate Wi-Fi off
+```
+
+## Installation
+
+### From Source (Rust)
+
+```bash
+git clone https://github.com/pagespeed-quest/http-playback-proxy.git
+cd http-playback-proxy
 cargo build --release
 ```
 
-### Go モジュールとして
+Binary location: `target/release/http-playback-proxy`
+
+### Go Module
 
 ```bash
 go get github.com/pagespeed-quest/http-playback-proxy/golang
 ```
 
-詳細は [golang/README.md](golang/README.md) を参照してください。
-
-### TypeScript/Node.js モジュールとして
-
-```bash
-npm install http-playback-proxy
-```
-
-詳細は [typescript/README.md](typescript/README.md) を参照してください。
-
-## 使用方法
-
-### 録画モード
-
-```bash
-# 基本的な録画
-./target/release/http-playback-proxy recording --port 8080 --inventory ./my-session
-
-# エントリーURLを指定
-./target/release/http-playback-proxy recording https://example.com --port 8080 --device desktop --inventory ./my-session
-```
-
-**パラメータ:**
-- `entry_url`: 録画開始のエントリーURL（オプション）
-- `--port`: プロキシサーバーのポート（デフォルト: 8080から自動検索）
-- `--device`: デバイスタイプ（mobile/desktop、デフォルト: mobile）
-- `--inventory`: インベントリディレクトリ（デフォルト: ./inventory）
-
-**録画の流れ:**
-1. プロキシサーバーが指定ポートで起動
-2. ブラウザのプロキシ設定を `127.0.0.1:8080` に設定
-3. Webサイトにアクセス
-4. `Ctrl+C` で録画終了
-5. `inventory.json` とコンテンツファイルが保存される
-
-### 再生モード
-
-```bash
-./target/release/http-playback-proxy playback --port 8080 --inventory ./my-session
-```
-
-**パラメータ:**
-- `--port`: プロキシサーバーのポート（デフォルト: 8080から自動検索）
-- `--inventory`: 録画データのディレクトリ
-
-**再生の流れ:**
-1. `inventory.json` から録画データを読み込み
-2. プロキシサーバーが指定ポートで起動
-3. ブラウザで同じURLにアクセス
-4. 録画時と同じタイミングでレスポンスが返される
-
-## データ構造
-
-### Inventory
-```json
-{
-  "entryUrl": "https://example.com",
-  "deviceType": "mobile",
-  "resources": [...]
-}
-```
-
-### Resource
-```json
-{
-  "method": "GET",
-  "url": "https://example.com/style.css",
-  "ttfbMs": 150,
-  "mbps": 2.5,
-  "statusCode": 200,
-  "rawHeaders": {
-    "content-type": "text/css; charset=utf-8"
-  },
-  "contentEncoding": "gzip",
-  "contentTypeMime": "text/css",
-  "contentTypeCharset": "utf-8",
-  "contentFilePath": "get/https/example.com/style.css",
-  "minify": true
-}
-```
-
-## テスト
-
-### 単体テスト
-
-```bash
-# 全ての単体テストを実行
-cargo test
-
-# 特定のモジュールのテストを実行
-cargo test recording
-cargo test playback
-
-# テスト詳細表示
-cargo test -- --nocapture
-
-# リリースモードでテスト
-cargo test --release
-```
-
-### テストカバレッジ
-
-```bash
-# tarpaulinをインストール（初回のみ）
-cargo install cargo-tarpaulin
-
-# カバレッジレポート生成
-cargo tarpaulin --out Html --output-dir coverage
-
-# ブラウザでレポートを確認
-open coverage/tarpaulin-report.html
-```
-
-### 結合テスト
-
-結合テストは実際のHTTPサーバーとプロキシを起動して、エンドツーエンドのテストを行います。
-
-```bash
-# 結合テストを実行
-cargo test --test integration_test
-
-# 詳細ログ付きで実行
-RUST_LOG=info cargo test --test integration_test -- --nocapture
-
-# リリースモードで実行（推奨）
-cargo test --test integration_test --release -- --nocapture
-```
-
-**結合テストの内容:**
-1. **静的Webサーバー起動**: HTML, CSS, JavaScriptを提供
-2. **録画プロキシ起動**: 指定ポートでHTTPプロキシを開始
-3. **HTTPリクエスト送信**: プロキシ経由でコンテンツを取得
-4. **ファイル確認**: `inventory.json` とコンテンツファイルの作成確認
-5. **再生プロキシ起動**: 録画データから再生プロキシを開始
-6. **再生確認**: 録画時と同じコンテンツが返されることを確認
-
-### テストのトラブルシューティング
-
-**ポート競合エラー:**
-```bash
-# 使用中のポートを確認
-lsof -i :8080
-
-# プロセスを終了
-kill -9 <PID>
-```
-
-**バイナリビルドエラー:**
-```bash
-# クリーンビルド
-cargo clean
-cargo build --release
-```
-
-**テストタイムアウト:**
-```bash
-# タイムアウト時間を延長
-cargo test -- --test-threads=1 --timeout=60
-```
-
-## 開発
-
-### プロジェクト構造
-
-```
-src/
-├── main.rs              # エントリーポイント
-├── cli.rs              # CLI定義
-├── types.rs            # データ型定義
-├── traits.rs           # 依存性注入用トレイト
-├── utils.rs            # ユーティリティ関数
-├── recording/          # 録画モード
-│   ├── mod.rs
-│   ├── proxy.rs        # HTTPプロキシサーバー
-│   └── processor.rs    # レスポンス処理
-└── playback/           # 再生モード
-    ├── mod.rs
-    ├── proxy.rs        # HTTPプロキシサーバー
-    └── transaction.rs  # トランザクション変換
-
-tests/
-└── integration_test.rs # 結合テスト
-```
-
-### コード品質
-
-**Lint実行:**
-```bash
-cargo clippy
-cargo clippy -- -D warnings  # 警告をエラーとして扱う
-```
-
-**フォーマット:**
-```bash
-cargo fmt
-cargo fmt -- --check  # フォーマットチェックのみ
-```
-
-**型チェック:**
-```bash
-cargo check
-```
-
-### 依存性注入とテスト
-
-テスタビリティ向上のため、以下のトレイトを使用した依存性注入を実装:
-
-- `FileSystem`: ファイルシステム操作の抽象化
-- `TimeProvider`: 時間取得の抽象化
-- `HttpClient`: HTTP通信の抽象化（将来の拡張用）
-
-```rust
-// 本番環境
-let processor = RequestProcessor::new(
-    inventory_dir,
-    Arc::new(RealFileSystem),
-    Arc::new(RealTimeProvider::new())
-);
-
-// テスト環境
-let processor = RequestProcessor::new(
-    inventory_dir,
-    Arc::new(MockFileSystem::new()),
-    Arc::new(MockTimeProvider::new())
-);
-```
-
-## パフォーマンス
-
-- **メモリ使用量**: 通常のWebページ読み込みを想定し、メモリを潤沢に使用
-- **並行処理**: Tokioによる非同期処理でリクエストを並行処理
-- **ストリーミング**: 大きなレスポンスも効率的に処理
-
-## トラブルシューティング
-
-### よくある問題
-
-**1. プロキシに接続できない**
-- ポートが使用中でないか確認
-- ファイアウォール設定を確認
-- ブラウザのプロキシ設定を確認
-
-**2. HTTPS接続エラー**
-- 証明書エラーは無視される設計
-- ブラウザで証明書警告が出た場合は「続行」を選択
-
-**3. 録画ファイルが作成されない**
-- ディスク容量を確認
-- 書き込み権限を確認
-- `Ctrl+C` で正常終了したか確認
-
-**4. 再生時にコンテンツが異なる**
-- `inventory.json` の内容を確認
-- コンテンツファイルの存在を確認
-- ログでエラーメッセージを確認
-
-## ライセンス
-
-[ライセンス情報を追加してください]
-
-## 貢献
-
-プルリクエストやイシューの報告を歓迎します。
-
-## 言語ラッパー
-
-### Go
-
-GoラッパーはRustバイナリをプロセスとして起動し、プロキシの管理とInventoryの読み書きを支援します。
-
+**Recording example:**
 ```go
 package main
 
 import (
     "fmt"
+    "time"
     proxy "github.com/pagespeed-quest/http-playback-proxy/golang"
 )
 
 func main() {
-    // Start recording proxy (with entry URL)
+    // Start recording proxy
     p, err := proxy.StartRecording(proxy.RecordingOptions{
-        EntryURL:     "https://example.com",  // Optional
-        Port:         8080,                   // Optional (default: 8080)
-        DeviceType:   proxy.DeviceTypeMobile, // Optional (default: mobile)
-        InventoryDir: "./inventory",          // Optional (default: ./inventory)
+        EntryURL:     "https://example.com",
+        Port:         8080,
+        DeviceType:   proxy.DeviceTypeMobile,
+        InventoryDir: "./inventory",
     })
     if err != nil {
         panic(err)
     }
 
-    // ... Do your requests ...
+    fmt.Printf("Recording proxy started on port %d\n", p.Port)
 
-    // Stop and save
-    p.Stop()
+    // Wait or do HTTP requests through the proxy
+    time.Sleep(30 * time.Second)
+
+    // Stop and save recording
+    if err := p.Stop(); err != nil {
+        panic(err)
+    }
+
+    // Load and analyze inventory
+    inventory, err := p.GetInventory()
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("Recorded %d resources\n", len(inventory.Resources))
 }
 ```
 
-詳細は [golang/README.md](golang/README.md) を参照してください。
+**Playback example:**
+```go
+// Start playback proxy
+p, err := proxy.StartPlayback(proxy.PlaybackOptions{
+    Port:         8080,
+    InventoryDir: "./inventory",
+})
+if err != nil {
+    panic(err)
+}
 
-### TypeScript/Node.js
+// Wait for requests
+time.Sleep(30 * time.Second)
 
-TypeScriptラッパーも同様に、Rustバイナリをプロセスとして起動します。
+// Stop playback
+p.Stop()
+```
 
+**Working with inventory:**
+```go
+// Load inventory
+inventory, err := proxy.LoadInventory("./inventory/inventory.json")
+if err != nil {
+    panic(err)
+}
+
+// Iterate resources
+for i, resource := range inventory.Resources {
+    fmt.Printf("%d: %s %s (TTFB: %dms)\n",
+        i, resource.Method, resource.URL, resource.TtfbMs)
+
+    // Get content file path
+    if resource.ContentFilePath != nil {
+        contentPath := proxy.GetResourceContentPath("./inventory", &resource)
+        // Read content file...
+    }
+}
+```
+
+See [golang/README.md](golang/README.md) for full API documentation.
+
+### TypeScript/Node.js Package
+
+```bash
+npm install http-playback-proxy
+```
+
+**Recording example:**
 ```typescript
 import { startRecording } from 'http-playback-proxy';
 
 async function record() {
+  // Start recording proxy
   const proxy = await startRecording({
-    entryUrl: 'https://example.com',  // Optional
-    port: 8080,                       // Optional (default: 8080)
-    deviceType: 'mobile',             // Optional (default: 'mobile')
-    inventoryDir: './inventory',      // Optional (default: './inventory')
+    entryUrl: 'https://example.com',
+    port: 8080,
+    deviceType: 'mobile',
+    inventoryDir: './inventory',
   });
 
-  // ... Do your requests ...
+  console.log(`Recording proxy started on port ${proxy.port}`);
 
+  // Wait or do HTTP requests through the proxy
+  await new Promise(resolve => setTimeout(resolve, 30000));
+
+  // Stop and save recording
   await proxy.stop();
+
+  // Load and analyze inventory
+  const inventory = await proxy.getInventory();
+  console.log(`Recorded ${inventory.resources.length} resources`);
+}
+
+record().catch(console.error);
+```
+
+**Playback example:**
+```typescript
+import { startPlayback } from 'http-playback-proxy';
+
+async function playback() {
+  // Start playback proxy
+  const proxy = await startPlayback({
+    port: 8080,
+    inventoryDir: './inventory',
+  });
+
+  console.log(`Playback proxy started on port ${proxy.port}`);
+
+  // Wait for requests
+  await new Promise(resolve => setTimeout(resolve, 30000));
+
+  // Stop playback
+  await proxy.stop();
+}
+
+playback().catch(console.error);
+```
+
+**Working with inventory:**
+```typescript
+import { loadInventory, getResourceContentPath } from 'http-playback-proxy';
+
+// Load inventory
+const inventory = await loadInventory('./inventory/inventory.json');
+
+// Iterate resources
+for (const [i, resource] of inventory.resources.entries()) {
+  console.log(`${i}: ${resource.method} ${resource.url} (TTFB: ${resource.ttfbMs}ms)`);
+
+  // Get content file path
+  if (resource.contentFilePath) {
+    const contentPath = getResourceContentPath('./inventory', resource);
+    // Read content file...
+  }
 }
 ```
 
-詳細は [typescript/README.md](typescript/README.md) を参照してください。
+See [typescript/README.md](typescript/README.md) for full API documentation.
 
-## リリースフロー
+## Architecture
 
-このプロジェクトは、GitHub Actionsを使用したマルチプラットフォームビルドとリリースプロセスを実装しています。
+### Core Implementation (Rust)
 
-### 1. Rustバイナリのリリース
+- **Runtime**: Tokio async runtime for concurrent request handling
+- **HTTP Stack**: Hyper 1.0, Hyper-util, Tower/Tower-http
+- **MITM Proxy**: Hudsucker 0.24 with rcgen-ca for self-signed certificates
+- **Content Processing**: Automatic beautification (prettyish-html, prettify-js)
+- **Compression**: gzip, deflate, brotli support (flate2, brotli crates)
+- **Encoding**: Charset detection and UTF-8 conversion (encoding_rs)
 
-```bash
-# バージョンタグを作成してプッシュ
-git tag v0.0.0
-git push origin v0.0.0
+### Data Structure
+
+Recordings are stored as:
+- `inventory.json`: Metadata for all resources (URLs, timing, headers)
+- `contents/`: Content files organized by method/protocol/path
+
+**Inventory Structure:**
+```json
+{
+  "entryUrl": "https://example.com",
+  "deviceType": "mobile",
+  "resources": [
+    {
+      "method": "GET",
+      "url": "https://example.com/style.css",
+      "ttfbMs": 150,
+      "mbps": 2.5,
+      "statusCode": 200,
+      "rawHeaders": {
+        "content-type": "text/css; charset=utf-8"
+      },
+      "contentEncoding": "gzip",
+      "contentFilePath": "get/https/example.com/style.css",
+      "minify": true
+    }
+  ]
+}
 ```
 
-これにより、GitHub Actionsが以下のプラットフォーム向けバイナリをビルドし、GitHub Releasesに公開します：
+### Language Wrappers
 
+**Go**: Process manager wrapper with Inventory helpers
+- Manages binary lifecycle (start/stop)
+- Type-safe Inventory reading/writing
+- Goroutine-based request handling
+
+**TypeScript/Node.js**: Similar wrapper for Node.js ecosystem
+- Promise-based API
+- npm package distribution
+- Full TypeScript type definitions
+
+## Testing Ecosystem
+
+### Unit Tests (Rust)
+
+```bash
+cargo test                    # All unit tests
+cargo test recording          # Recording module tests
+cargo test playback           # Playback module tests
+cargo test -- --nocapture     # With detailed output
+```
+
+### Integration Tests (Rust)
+
+Located in `tests/integration_test.rs`. Full end-to-end Rust test:
+
+```bash
+cargo test --test integration_test --release -- --nocapture
+```
+
+Tests: Recording → Inventory saving → Playback → Content verification
+
+### E2E Tests (Core Functionality)
+
+Located in `e2e/`. Tests core binary functionality:
+
+```bash
+cd e2e
+make test-all                 # All E2E tests
+make test-performance         # Performance/stress test
+make test-minimum             # Timing accuracy test (6 scenarios)
+make test-content             # Content beautification test
+```
+
+**Minimum Timing Test** (`e2e/minimum/`):
+- Tests 6 scenarios with different file sizes and latencies
+- Verifies ±10% timing accuracy for TTFB and transfer duration
+- Runtime: ~60-90 seconds
+
+**Content Beautification Test** (`e2e/content/`):
+- Verifies minified HTML/CSS/JS are beautified during recording
+- Checks `minify: true` flag in inventory
+- Ensures content is editable for PageSpeed optimization
+- Runtime: ~10 seconds
+
+See [e2e/README.md](e2e/README.md) for details.
+
+### Acceptance Tests (Language Wrappers)
+
+Located in `acceptance/`. Tests Go and TypeScript wrappers:
+
+```bash
+cd acceptance
+make test-all                 # Test both Go and TypeScript wrappers
+make test-golang              # Go wrapper only
+make test-typescript          # TypeScript wrapper only
+```
+
+**Go Acceptance Test** (`acceptance/golang/`):
+- Verifies Go API (StartRecording, StartPlayback, Stop)
+- Tests binary distribution in Go module
+- Validates Inventory reading/writing
+
+**TypeScript Acceptance Test** (`acceptance/typescript/`):
+- Verifies TypeScript API
+- Tests binary distribution in npm package
+- Validates Promise-based workflow
+
+See [acceptance/README.md](acceptance/README.md) for details.
+
+## CI/CD Workflow
+
+Pre-commit checks (run locally):
+```bash
+./check-ci.sh                 # Runs exact CI checks locally
+```
+
+This script runs:
+1. `cargo fmt --all -- --check` - Formatting verification
+2. `cargo clippy --all-targets --all-features -- -D warnings` - Strict linting
+3. `cargo test` - All tests (unit + integration)
+
+### Release Workflow
+
+Multi-platform automated release:
+
+```
+1. Create tag:          git tag v0.0.0 && git push origin v0.0.0
+2. GitHub Actions:      Build binaries for 5 platforms (release.yml)
+3. Create Release:      Publish to GitHub Releases
+4. Auto-trigger:        update-binaries.yml workflow
+5. Create PR:           Binaries → golang/bin/ and typescript/bin/
+6. Run Acceptance:      Test all platforms (acceptance-test.yml)
+7. Merge PR:            After tests pass
+8. Tag Go module:       git tag golang/v0.0.0 && git push
+9. Publish npm:         cd typescript && npm publish
+```
+
+Supported platforms:
 - darwin-arm64 (macOS Apple Silicon)
 - darwin-amd64 (macOS Intel)
 - linux-amd64 (Linux x86_64)
 - linux-arm64 (Linux ARM64)
 - windows-amd64 (Windows x86_64)
 
-### 2. 言語ラッパーへのバイナリ取り込み
+## Development
 
-リリースが公開されると、`update-binaries` ワークフローが自動的に起動し、以下を行います：
+### Project Structure
 
-1. 各プラットフォームのバイナリをダウンロード
-2. `golang/bin/` と `typescript/bin/` に配置
-3. TypeScriptの `package.json` のバージョンを更新
-4. プルリクエストを作成
+```
+.
+├── src/                     # Rust core implementation
+│   ├── recording/           # Recording mode (MITM proxy, response processing)
+│   ├── playback/            # Playback mode (timing control, transaction matching)
+│   └── ...
+├── tests/                   # Rust integration tests
+├── e2e/                     # Core E2E tests (performance, timing, content)
+├── acceptance/              # Language wrapper acceptance tests
+├── golang/                  # Go language wrapper + tests
+├── typescript/              # TypeScript/Node.js wrapper + tests
+└── .github/workflows/       # CI/CD workflows
+```
 
-### 3. PRのマージとパッケージ公開
+### Code Quality
 
-PRをレビュー・マージした後：
-
-**Goモジュールのタグ:**
+**Pre-commit checks (recommended):**
 ```bash
-git tag golang/v0.0.0
-git push origin golang/v0.0.0
+./check-ci.sh                # Runs exact CI checks locally
 ```
 
-**TypeScriptパッケージの公開:**
+This script runs:
+1. `cargo fmt --all -- --check` - Formatting verification
+2. `cargo clippy --all-targets --all-features -- -D warnings` - Strict linting
+3. `cargo test` - All tests (unit + integration)
+
+**Individual commands:**
 ```bash
-cd typescript
-npm publish
+cargo fmt                    # Auto-format code
+cargo clippy                 # Lint check
+cargo test                   # Run all tests
+cargo build --release        # Release build
 ```
 
-### ワークフロー概要
+### Key Implementation Features
 
-```
-v0.0.0 タグ作成
-    ↓
-GitHub Actions: release.yml
-    ↓
-各プラットフォームでビルド
-    ↓
-GitHub Releasesに公開
-    ↓
-GitHub Actions: update-binaries.yml (自動起動)
-    ↓
-バイナリダウンロード & PRの作成
-    ↓
-GitHub Actions: acceptance-test.yml (PR作成時に自動実行)
-    ↓
-受け入れテスト (Go/TypeScript × 複数プラットフォーム)
-    ↓
-PRレビュー & マージ
-    ↓
-golang/v0.0.0 タグ & npm publish
-```
+**Recording:**
+- MITM proxy using Hudsucker with self-signed certificates
+- Per-connection FIFO queues for request/response correlation
+- Automatic content beautification (minified HTML/CSS/JS)
+- Multi-value header support (e.g., Set-Cookie)
+- UTF-8 conversion and charset detection
 
-## 受け入れテスト
+**Playback:**
+- Precise timing control (±10% accuracy for TTFB and transfer duration)
+- Chunk-based response streaming with target times
+- Transaction matching by method + host + path + query
+- Automatic re-minification and re-encoding
 
-`acceptance/` ディレクトリには、本番環境に近い状態で動作を検証する受け入れテストが含まれています。
+**Testability:**
+- Trait-based dependency injection (FileSystem, TimeProvider)
+- Mock implementations for unit testing
+- Comprehensive test coverage (unit, integration, E2E, acceptance)
 
-### テスト内容
+## Troubleshooting
 
-各言語ラッパー（Go/TypeScript）に対して以下をテスト：
-1. **Recording**: HTTPトラフィックの録画と保存
-2. **Inventory解析**: 録画データの読み込みと検証
-3. **Playback**: 録画データの再生と精度確認
+**Proxy Connection Issues:**
+- Verify port availability: `lsof -i :8080`
+- Check firewall settings
+- Verify browser proxy configuration
 
-### テスト環境
+**HTTPS Certificate Errors:**
+- Browser: Click "Advanced" → "Proceed" (certificate is self-signed)
+- System trust: Add certificate to system trust store if needed
 
-- **複数プラットフォーム**: ubuntu, macos (ARM64/x86_64), windows
-- **本番同等**: 実際のGoモジュール/npmパッケージとして使用
-- **自動実行**: PRに対して自動実行される
-
-### ローカルでのテスト実行
-
-**Go:**
+**Binary Not Found (Tests):**
 ```bash
-cd acceptance/golang
-go test -v -timeout 5m
+cargo build --release
+ls -la target/release/http-playback-proxy
 ```
 
-**TypeScript:**
-```bash
-cd acceptance/typescript
-npm install
-npm test
-```
+**Port Conflicts:**
+- Tests use auto-assigned ports (port 0)
+- Kill stuck processes: `lsof -i :8080 && kill -9 <PID>`
 
-詳細は各ディレクトリのREADMEを参照してください：
-- [acceptance/golang/README.md](acceptance/golang/README.md)
-- [acceptance/typescript/README.md](acceptance/typescript/README.md)
+**Timing Inaccuracy:**
+- Check system load (high CPU/disk usage affects timing)
+- Verify network stability
+- See minimum timing test for expected tolerances
 
-## 更新履歴
+## Contributing
 
-- v0.0.0: 初期実装
-  - 録画・再生機能
-  - HTTPS対応
-  - 依存性注入によるテスタビリティ向上
-  - 結合テスト実装
-  - Go/TypeScriptラッパー実装
-  - マルチプラットフォームビルド対応
+Contributions are welcome! Please:
+1. Run `./check-ci.sh` before committing
+2. Add tests for new features
+3. Update documentation
+4. Follow existing code style
+
+## License
+
+[Add license information]
+
+## See Also
+
+- [CLAUDE.md](CLAUDE.md) - Development guidance for AI assistants
+- [E2E Tests README](e2e/README.md) - Core E2E testing
+- [Acceptance Tests README](acceptance/README.md) - Language wrapper testing
+- [Go Wrapper README](golang/README.md) - Go API documentation
+- [TypeScript Wrapper README](typescript/README.md) - TypeScript API documentation
