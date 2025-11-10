@@ -126,9 +126,5 @@ jobs:
           # GITHUB_TOKEN cannot trigger other workflows due to GitHub Actions security
           GITHUB_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
 
-      - name: Trigger update-binaries workflow
-        continue-on-error: true
-        run: |
-          gh workflow run update-binaries.yml -f tag=${{ github.ref_name }}
-        env:
-          GH_TOKEN: ${{ secrets.PAT_TOKEN || secrets.GITHUB_TOKEN }}
+      # Note: update-binaries workflow is automatically triggered by release:published event
+      # No need to manually trigger it here to avoid duplicate runs
