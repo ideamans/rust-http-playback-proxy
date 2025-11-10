@@ -151,6 +151,12 @@ jobs:
         run: make test
         timeout-minutes: 5
 
+      - name: Setup Rust (Windows E2E)
+        if: runner.os == 'Windows'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
       - name: Run performance E2E test (Windows)
         if: runner.os == 'Windows'
         working-directory: e2e/performance
@@ -181,6 +187,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Rust (Windows E2E)
+        if: runner.os == 'Windows'
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
       - name: Download binary artifact
         uses: actions/download-artifact@v4
         with:
@@ -191,10 +203,19 @@ jobs:
         if: runner.os != 'Windows'
         run: chmod +x target/release/http-playback-proxy
 
-      - name: Run content beautification E2E test
+      - name: Run content beautification E2E test (Unix)
+        if: runner.os != 'Windows'
         working-directory: e2e/content
         shell: bash
         run: ./run.sh
+        timeout-minutes: 5
+
+      - name: Run content beautification E2E test (Windows)
+        if: runner.os == 'Windows'
+        working-directory: e2e/content
+        shell: pwsh
+        run: |
+          cargo run --release
         timeout-minutes: 5
 
   e2e-integration:
@@ -321,6 +342,12 @@ jobs:
       - name: Make binary executable (Unix)
         if: runner.os != 'Windows'
         run: chmod +x typescript/bin/${{ matrix.platform }}/http-playback-proxy
+
+      - name: Verify binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse typescript/bin/${{ matrix.platform }}/ | Select-Object FullName
 
       - name: Install TypeScript wrapper dependencies
         working-directory: typescript
