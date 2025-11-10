@@ -347,14 +347,69 @@ fn start_recording_proxy(
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
-    let manifest_path = repo_root.join("Cargo.toml");
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    // Check if we're in CI environment (binary should be pre-built)
+    let use_prebuilt = std::env::var("CI").is_ok();
 
-    #[cfg(windows)]
-    let child = {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+    let child = if use_prebuilt {
+        // CI: Use pre-built binary directly
+        let binary_path = repo_root.join("target/release/http-playback-proxy");
+        #[cfg(windows)]
+        let binary_path = binary_path.with_extension("exe");
 
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+
+            Command::new(binary_path)
+                .arg("recording")
+                .arg(entry_url)
+                .arg("--port")
+                .arg(proxy_port.to_string())
+                .arg("--inventory")
+                .arg(inventory_dir.to_str().unwrap())
+                .creation_flags(CREATE_NEW_PROCESS_GROUP)
+                .spawn()?
+        }
+
+        #[cfg(not(windows))]
+        Command::new(binary_path)
+            .arg("recording")
+            .arg(entry_url)
+            .arg("--port")
+            .arg(proxy_port.to_string())
+            .arg("--inventory")
+            .arg(inventory_dir.to_str().unwrap())
+            .spawn()?
+    } else {
+        // Local: Use cargo run for developer convenience
+        let manifest_path = repo_root.join("Cargo.toml");
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+
+            Command::new(cargo)
+                .arg("run")
+                .arg("--release")
+                .arg("--manifest-path")
+                .arg(manifest_path)
+                .arg("--bin")
+                .arg("http-playback-proxy")
+                .arg("--")
+                .arg("recording")
+                .arg(entry_url)
+                .arg("--port")
+                .arg(proxy_port.to_string())
+                .arg("--inventory")
+                .arg(inventory_dir.to_str().unwrap())
+                .creation_flags(CREATE_NEW_PROCESS_GROUP)
+                .spawn()?
+        }
+
+        #[cfg(not(windows))]
         Command::new(cargo)
             .arg("run")
             .arg("--release")
@@ -369,26 +424,8 @@ fn start_recording_proxy(
             .arg(proxy_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
-            .creation_flags(CREATE_NEW_PROCESS_GROUP)
             .spawn()?
     };
-
-    #[cfg(not(windows))]
-    let child = Command::new(cargo)
-        .arg("run")
-        .arg("--release")
-        .arg("--manifest-path")
-        .arg(manifest_path)
-        .arg("--bin")
-        .arg("http-playback-proxy")
-        .arg("--")
-        .arg("recording")
-        .arg(entry_url)
-        .arg("--port")
-        .arg(proxy_port.to_string())
-        .arg("--inventory")
-        .arg(inventory_dir.to_str().unwrap())
-        .spawn()?;
 
     Ok(child)
 }
