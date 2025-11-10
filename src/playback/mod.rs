@@ -52,7 +52,7 @@ pub async fn load_inventory<F: FileSystem>(
     inventory_dir: &Path,
     file_system: Arc<F>,
 ) -> Result<Inventory> {
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_content = file_system.read_to_string(&inventory_path).await?;
     let inventory: Inventory = serde_json::from_str(&inventory_content)?;
     Ok(inventory)

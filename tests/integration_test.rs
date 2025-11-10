@@ -409,19 +409,15 @@ async fn stop_recording_proxy(mut recording_proxy: Child) {
                 if let Some(stdout) = recording_proxy.stdout.take() {
                     use std::io::Read;
                     let mut buf = Vec::new();
-                    if let Ok(_) = std::io::BufReader::new(stdout).read_to_end(&mut buf) {
-                        if !buf.is_empty() {
-                            println!("Recording proxy stdout:\n{}", String::from_utf8_lossy(&buf));
-                        }
+                    if std::io::BufReader::new(stdout).read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                        println!("Recording proxy stdout:\n{}", String::from_utf8_lossy(&buf));
                     }
                 }
                 if let Some(stderr) = recording_proxy.stderr.take() {
                     use std::io::Read;
                     let mut buf = Vec::new();
-                    if let Ok(_) = std::io::BufReader::new(stderr).read_to_end(&mut buf) {
-                        if !buf.is_empty() {
-                            println!("Recording proxy stderr:\n{}", String::from_utf8_lossy(&buf));
-                        }
+                    if std::io::BufReader::new(stderr).read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                        println!("Recording proxy stderr:\n{}", String::from_utf8_lossy(&buf));
                     }
                 }
             }
@@ -703,12 +699,12 @@ async fn test_recording_and_playback_integration() {
         println!("Could not read inventory directory");
     }
 
-    let inventory_file = inventory_dir.join("inventory.json");
-    assert!(inventory_file.exists(), "inventory.json should exist");
+    let inventory_file = inventory_dir.join("index.json");
+    assert!(inventory_file.exists(), "index.json should exist");
 
     // Read inventory to see what's in it
     if let Ok(inv_content) = std::fs::read_to_string(&inventory_file) {
-        println!("Inventory.json contents:\n{}", inv_content);
+        println!("index.json contents:\n{}", inv_content);
     }
 
     let contents_dir = inventory_dir.join("contents");
@@ -717,12 +713,12 @@ async fn test_recording_and_playback_integration() {
     // Read and verify inventory
     let inventory_content = tokio::fs::read_to_string(&inventory_file)
         .await
-        .expect("Failed to read inventory.json");
+        .expect("Failed to read index.json");
     println!("Inventory content: {}", inventory_content);
 
     // Parse inventory JSON
     let inventory: serde_json::Value =
-        serde_json::from_str(&inventory_content).expect("Failed to parse inventory.json");
+        serde_json::from_str(&inventory_content).expect("Failed to parse index.json");
 
     let resources = inventory
         .get("resources")
@@ -890,15 +886,15 @@ async fn test_recording_error_responses() {
     static_server.shutdown();
 
     // Verify inventory was created
-    let inventory_file = inventory_dir.join("inventory.json");
-    assert!(inventory_file.exists(), "inventory.json should exist");
+    let inventory_file = inventory_dir.join("index.json");
+    assert!(inventory_file.exists(), "index.json should exist");
 
     // Parse and verify error responses were recorded
     let inventory_content = tokio::fs::read_to_string(&inventory_file)
         .await
-        .expect("Failed to read inventory.json");
+        .expect("Failed to read index.json");
     let inventory: serde_json::Value =
-        serde_json::from_str(&inventory_content).expect("Failed to parse inventory.json");
+        serde_json::from_str(&inventory_content).expect("Failed to parse index.json");
 
     let resources = inventory["resources"]
         .as_array()
@@ -1001,15 +997,15 @@ async fn test_recording_with_compression() {
     static_server.shutdown();
 
     // Verify inventory was created
-    let inventory_file = inventory_dir.join("inventory.json");
-    assert!(inventory_file.exists(), "inventory.json should exist");
+    let inventory_file = inventory_dir.join("index.json");
+    assert!(inventory_file.exists(), "index.json should exist");
 
     // Parse and verify compressed resources were recorded with correct encoding
     let inventory_content = tokio::fs::read_to_string(&inventory_file)
         .await
-        .expect("Failed to read inventory.json");
+        .expect("Failed to read index.json");
     let inventory: serde_json::Value =
-        serde_json::from_str(&inventory_content).expect("Failed to parse inventory.json");
+        serde_json::from_str(&inventory_content).expect("Failed to parse index.json");
 
     let resources = inventory["resources"]
         .as_array()
@@ -1117,14 +1113,14 @@ async fn test_inventory_structure_validation() {
     static_server.shutdown();
 
     // Validate inventory structure
-    let inventory_file = inventory_dir.join("inventory.json");
-    assert!(inventory_file.exists(), "inventory.json must exist");
+    let inventory_file = inventory_dir.join("index.json");
+    assert!(inventory_file.exists(), "index.json must exist");
 
     let inventory_content = tokio::fs::read_to_string(&inventory_file)
         .await
-        .expect("Failed to read inventory.json");
+        .expect("Failed to read index.json");
     let inventory: serde_json::Value =
-        serde_json::from_str(&inventory_content).expect("Failed to parse inventory.json");
+        serde_json::from_str(&inventory_content).expect("Failed to parse index.json");
 
     // Validate top-level structure
     assert!(inventory.is_object(), "Inventory must be an object");
@@ -1299,7 +1295,7 @@ async fn test_http_shutdown() {
     println!("Recording proxy exit result: {:?}", exit_result);
 
     // Verify inventory was saved
-    let inventory_file = inventory_dir.join("inventory.json");
+    let inventory_file = inventory_dir.join("index.json");
     assert!(
         inventory_file.exists(),
         "Inventory file should exist after HTTP shutdown"

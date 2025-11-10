@@ -23,7 +23,7 @@ mod playback_tests {
 
         // Save the inventory
         tokio::fs::create_dir_all(&inventory_dir).await.unwrap();
-        let inventory_path = inventory_dir.join("inventory.json");
+        let inventory_path = inventory_dir.join("index.json");
         // 2スペースインデントで整形
         let mut buf = Vec::new();
         let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");
@@ -476,7 +476,7 @@ mod playback_tests {
         let mock_fs = Arc::new(MockFileSystem::new());
 
         // Create invalid JSON file
-        let inventory_path = inventory_dir.join("inventory.json");
+        let inventory_path = inventory_dir.join("index.json");
         mock_fs.set_file(
             &inventory_path.to_string_lossy(),
             b"{ invalid json".to_vec(),

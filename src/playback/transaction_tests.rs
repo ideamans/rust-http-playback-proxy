@@ -272,7 +272,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_convert_resource_with_original_charset() {
+    async fn test_convert_resource_with_content_charset() {
         let temp_dir = TempDir::new().unwrap();
         let inventory_dir = temp_dir.path().to_path_buf();
 
@@ -288,11 +288,19 @@ mod tests {
             "https://example.com/index.html".to_string(),
         );
         resource.content_file_path = Some("contents/get/https/example.com/index.html".to_string());
-        resource.original_charset = Some("Shift_JIS".to_string());
+        resource.content_charset = Some("Shift_JIS".to_string());
         resource.content_type_mime = Some("text/html".to_string());
-        resource.content_type_charset = Some("UTF-8".to_string());
         resource.status_code = Some(200);
         resource.ttfb_ms = 100;
+
+        // Set raw_headers with Content-Type that includes charset
+        use std::collections::HashMap;
+        let mut raw_headers = HashMap::new();
+        raw_headers.insert(
+            "content-type".to_string(),
+            crate::types::HeaderValue::Single("text/html; charset=Shift_JIS".to_string()),
+        );
+        resource.raw_headers = Some(raw_headers);
 
         let transaction = convert_resource_to_transaction(&resource, &inventory_dir, mock_fs)
             .await

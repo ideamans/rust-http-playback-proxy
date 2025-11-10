@@ -30,7 +30,7 @@ The test simulates a realistic web scenario with:
            │
            ↓ Saves to
 ┌─────────────────────┐
-│  inventory.json +   │  ← Verification (±10%)
+│  index.json +   │  ← Verification (±10%)
 │  resource files     │
 └──────────┬──────────┘
            │
@@ -59,7 +59,7 @@ The test simulates a realistic web scenario with:
 ### Verification Points
 
 **Phase 1: Recording Validation**
-- Verify `inventory.json` contains accurate timing data
+- Verify `index.json` contains accurate timing data
 - TTFB within ±10% of expected value
 - Download end time within ±10% of expected value
 - Bandwidth (Mbps) calculation accuracy

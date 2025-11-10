@@ -163,7 +163,10 @@ pub async fn start_recording_proxy(
         if let Err(e) = save_inventory(&inventory, &inventory_dir_clone).await {
             error!("Failed to save inventory: {}", e);
         } else {
-            info!("Inventory saved successfully with {} resources", inventory.resources.len());
+            info!(
+                "Inventory saved successfully with {} resources",
+                inventory.resources.len()
+            );
         }
 
         // Wait for async file writes to complete before exiting
@@ -244,7 +247,7 @@ pub async fn save_inventory_with_fs<F: FileSystem>(
 ) -> Result<()> {
     file_system.create_dir_all(inventory_dir).await?;
 
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     // 2スペースインデントで整形
     let mut buf = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");

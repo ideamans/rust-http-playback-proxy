@@ -36,7 +36,7 @@ type Resource struct {
 	RawHeaders         map[string]string    `json:"rawHeaders,omitempty"`
 	ContentEncoding    *ContentEncodingType `json:"contentEncoding,omitempty"`
 	ContentTypeMime    *string              `json:"contentTypeMime,omitempty"`
-	ContentTypeCharset *string              `json:"contentTypeCharset,omitempty"`
+	ContentCharset     *string              `json:"contentCharset,omitempty"`
 	ContentFilePath    *string              `json:"contentFilePath,omitempty"`
 	ContentUtf8        *string              `json:"contentUtf8,omitempty"`
 	ContentBase64      *string              `json:"contentBase64,omitempty"`
@@ -84,7 +84,7 @@ func GetResourceContentPath(inventoryDir string, resource *Resource) string {
 	return filepath.Join(inventoryDir, *resource.ContentFilePath)
 }
 
-// GetInventoryPath returns the path to the inventory.json file
+// GetInventoryPath returns the path to the index.json file
 func GetInventoryPath(inventoryDir string) string {
-	return filepath.Join(inventoryDir, "inventory.json")
+	return filepath.Join(inventoryDir, "index.json")
 }

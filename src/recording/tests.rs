@@ -40,7 +40,7 @@ mod recording_tests {
         save_inventory(&inventory, &inventory_dir).await.unwrap();
 
         // Check if the file was created
-        let inventory_file = inventory_dir.join("inventory.json");
+        let inventory_file = inventory_dir.join("index.json");
         assert!(inventory_file.exists());
 
         // Check if we can read it back

@@ -37,7 +37,7 @@ mod tests {
 
         // Verify file was created
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         assert!(mock_fs.file_exists(&inventory_path));
@@ -95,7 +95,7 @@ mod tests {
 
         // Directory should have been created
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         assert!(mock_fs.file_exists(&inventory_path));
@@ -125,7 +125,7 @@ mod tests {
 
         // Get the saved JSON
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         let saved_json = mock_fs.get_file(&inventory_path).unwrap();
@@ -201,7 +201,7 @@ mod tests {
 
         resource.content_encoding = Some(crate::types::ContentEncodingType::Gzip);
         resource.content_type_mime = Some("application/json".to_string());
-        resource.content_type_charset = Some("UTF-8".to_string());
+        resource.content_charset = Some("UTF-8".to_string());
         resource.content_file_path = Some("put/https/api.example.com/data~id=123.json".to_string());
         resource.minify = Some(true);
 
@@ -259,7 +259,7 @@ mod tests {
 
         // Get the saved JSON
         let inventory_path = inventory_dir
-            .join("inventory.json")
+            .join("index.json")
             .to_string_lossy()
             .to_string();
         let saved_json = mock_fs.get_file(&inventory_path).unwrap();

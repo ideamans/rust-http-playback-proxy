@@ -1,7 +1,8 @@
 use crate::traits::{FileSystem, TimeProvider};
 use crate::types::{ContentEncodingType, Resource};
 use crate::utils::{
-    extract_charset_from_content_type, generate_file_path_from_url, is_text_resource,
+    extract_charset_from_content_type, extract_charset_from_css, extract_charset_from_html,
+    generate_file_path_from_url, is_text_resource,
 };
 use anyhow::Result;
 use encoding_rs::{Encoding, UTF_8};
@@ -41,9 +42,26 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
         if let Some(ct) = content_type {
             resource.content_type_mime =
                 Some(ct.split(';').next().unwrap_or(ct).trim().to_string());
-            resource.content_type_charset = extract_charset_from_content_type(ct);
 
+            // Extract and save charset from Content-Type for text resources
             if is_text_resource(ct) {
+                // First try to get charset from HTTP header
+                let mut charset = extract_charset_from_content_type(ct);
+
+                // If HTTP header doesn't have charset, try to detect from content
+                if charset.is_none() {
+                    let mime = resource.content_type_mime.as_deref().unwrap_or("");
+                    charset = if mime == "text/html" {
+                        extract_charset_from_html(&decompressed_body)
+                    } else if mime == "text/css" {
+                        extract_charset_from_css(&decompressed_body)
+                    } else {
+                        None
+                    };
+                }
+
+                resource.content_charset = charset;
+
                 // Try to process as text, fallback to binary if it fails
                 if let Err(e) = self
                     .process_text_resource(resource, &decompressed_body)
@@ -116,15 +134,9 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
 
     #[allow(dead_code)]
     pub async fn process_text_resource(&self, resource: &mut Resource, body: &[u8]) -> Result<()> {
-        // Save original charset before conversion
-        resource.original_charset = resource.content_type_charset.clone();
-
-        // Convert to UTF-8
+        // Convert to UTF-8 (content_charset already saved in process_resource)
         let (utf8_content, _detected_encoding) =
-            self.convert_to_utf8(body, &resource.content_type_charset);
-
-        // Update charset to UTF-8 (for internal storage only)
-        resource.content_type_charset = Some("UTF-8".to_string());
+            self.convert_to_utf8(body, &resource.content_charset);
 
         // Check if content was minified by beautifying and comparing line counts
         let original_lines = utf8_content.lines().count();
@@ -198,23 +210,11 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
     #[allow(dead_code)]
     pub fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
         match mime_type.as_deref() {
-            Some("text/html") => {
-                // Use prettyish-html library
-                Ok(prettyish_html::prettify(content).to_string())
-            }
+            Some("text/html") => crate::beautify::format_html(content),
             Some("application/javascript") | Some("text/javascript") => {
-                // Use prettify-js library
-                let (prettified, _source_map) = prettify_js::prettyprint(content);
-                Ok(prettified)
+                crate::beautify::format_javascript(content)
             }
-            Some("text/css") => {
-                // Simple CSS beautification (no library available for current Rust version)
-                let result = content
-                    .replace('{', "{\n")
-                    .replace('}', "\n}\n")
-                    .replace(';', ";\n");
-                Ok(result)
-            }
+            Some("text/css") => crate::beautify::format_css(content),
             _ => Ok(content.to_string()),
         }
     }

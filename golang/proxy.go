@@ -394,6 +394,6 @@ func (p *Proxy) Wait() error {
 // GetInventory loads the inventory for this proxy
 // This is useful after recording is complete
 func (p *Proxy) GetInventory() (*Inventory, error) {
-	inventoryPath := filepath.Join(p.InventoryDir, "inventory.json")
+	inventoryPath := filepath.Join(p.InventoryDir, "index.json")
 	return LoadInventory(inventoryPath)
 }

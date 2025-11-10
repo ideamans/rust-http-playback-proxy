@@ -36,7 +36,7 @@ mod tests {
 
         // Verify resource was updated
         assert_eq!(resource.content_type_mime, Some("text/html".to_string()));
-        assert_eq!(resource.content_type_charset, Some("UTF-8".to_string()));
+        assert_eq!(resource.content_charset, Some("utf-8".to_string()));
         assert!(resource.content_file_path.is_some());
         assert!(resource.minify.is_some());
     }
@@ -70,7 +70,6 @@ mod tests {
 
         // Verify resource was updated
         assert!(resource.content_file_path.is_some());
-        assert_eq!(resource.content_type_charset, Some("UTF-8".to_string()));
     }
 
     #[tokio::test]
@@ -202,7 +201,7 @@ mod tests {
             "https://example.com/index.html".to_string(),
         );
         resource.content_type_mime = Some("text/html".to_string());
-        resource.content_type_charset = Some("Shift_JIS".to_string());
+        resource.content_charset = Some("Shift_JIS".to_string());
 
         // Create a simple HTML with Shift_JIS charset in meta
         let html = r#"<html><head><meta charset="Shift_JIS"><title>テスト</title></head><body>内容</body></html>"#;
@@ -213,11 +212,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Verify original charset is preserved
-        assert_eq!(resource.original_charset, Some("Shift_JIS".to_string()));
-
-        // Verify charset was converted to UTF-8 for internal storage
-        assert_eq!(resource.content_type_charset, Some("UTF-8".to_string()));
+        // Verify content_charset is preserved (contains the original charset from Content-Type)
+        assert_eq!(resource.content_charset, Some("Shift_JIS".to_string()));
 
         // Verify meta tag was NOT modified (kept original Shift_JIS)
         let file_path = inventory_dir.join(resource.content_file_path.as_ref().unwrap());

@@ -31,7 +31,7 @@ For each scenario:
            ↓
 ┌─────────────────────┐
 │  Inventory          │  ← Verify recorded timing (±10%)
-│  (inventory.json)   │
+│  (index.json)   │
 └──────────┬──────────┘
            │
            ↓
