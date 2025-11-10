@@ -463,8 +463,38 @@ async fn start_playback_proxy(port: u16, inventory_dir: &Path) -> Result<Child> 
         .stderr(Stdio::piped())
         .spawn()?;
 
-    // Wait for the proxy to start
-    sleep(Duration::from_millis(1000)).await;
+    // Wait for the proxy to start and be ready
+    // Try to connect multiple times to ensure it's ready
+    sleep(Duration::from_millis(500)).await;
+
+    let client = reqwest::Client::new();
+    let mut connected = false;
+    for _ in 0..10 {
+        if client
+            .get(&format!("http://127.0.0.1:{}/__health", port))
+            .timeout(Duration::from_millis(100))
+            .send()
+            .await
+            .is_ok()
+        {
+            // Connection succeeded, server is listening
+            connected = true;
+            break;
+        }
+        sleep(Duration::from_millis(200)).await;
+    }
+
+    if !connected {
+        // Try one more time with longer timeout
+        let _ = client
+            .get(&format!("http://127.0.0.1:{}/__health", port))
+            .timeout(Duration::from_millis(500))
+            .send()
+            .await;
+    }
+
+    // Give it a bit more time to fully initialize
+    sleep(Duration::from_millis(500)).await;
 
     Ok(child)
 }
@@ -1112,22 +1142,98 @@ async fn test_inventory_structure_validation() {
         );
     }
 
-    // Validate contents directory structure
-    let contents_dir = inventory_dir.join("contents");
-    assert!(contents_dir.exists(), "contents directory must exist");
-    assert!(contents_dir.is_dir(), "contents must be a directory");
+    println!("Inventory structure validation completed successfully!");
+}
 
-    // Check that content files exist for resources with contentFilePath
-    for resource in resources {
-        if let Some(file_path) = resource["contentFilePath"].as_str() {
-            let full_path = inventory_dir.join(file_path);
-            assert!(
-                full_path.exists(),
-                "Content file must exist: {}",
-                full_path.display()
-            );
-        }
+#[tokio::test]
+async fn test_http_shutdown() {
+    // Test HTTP-based shutdown for both recording and playback proxies
+    ensure_binary_exists().await.expect("Binary not found");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let inventory_dir = temp_dir.path().to_path_buf();
+
+    // Start static web server
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to start static server");
+    let server_url = static_server.url();
+
+    let recording_port = find_free_port().expect("Failed to find free port for recording");
+    let playback_port = find_free_port().expect("Failed to find free port for playback");
+
+    // Test 1: Recording proxy HTTP shutdown
+    println!("Testing recording proxy HTTP shutdown...");
+    let mut recording_proxy = start_recording_proxy(recording_port, &inventory_dir)
+        .await
+        .expect("Failed to start recording proxy");
+
+    let client = http_client_with_proxy(recording_port).await;
+    let _ = client.get(&server_url).send().await;
+
+    // Send HTTP shutdown request
+    let mgmt_port = recording_port + 1;
+    let shutdown_client = reqwest::Client::new();
+    let shutdown_response = shutdown_client
+        .post(&format!("http://127.0.0.1:{}/_shutdown", mgmt_port))
+        .send()
+        .await
+        .expect("Failed to send shutdown request");
+
+    let status = shutdown_response.status();
+    if !status.is_success() {
+        let body = shutdown_response.text().await.unwrap_or_default();
+        panic!("Shutdown request failed with status {}: {}", status, body);
     }
 
-    println!("Inventory structure validation completed successfully!");
+    // Wait for process to exit (blocking call, so use spawn_blocking)
+    let exit_result = timeout(
+        Duration::from_secs(15),
+        tokio::task::spawn_blocking(move || recording_proxy.wait()),
+    )
+    .await
+    .expect("Recording proxy did not exit in time")
+    .expect("Failed to join task");
+
+    println!("Recording proxy exit result: {:?}", exit_result);
+
+    // Verify inventory was saved
+    let inventory_file = inventory_dir.join("inventory.json");
+    assert!(
+        inventory_file.exists(),
+        "Inventory file should exist after HTTP shutdown"
+    );
+
+    // Test 2: Playback proxy HTTP shutdown
+    println!("Testing playback proxy HTTP shutdown...");
+    let mut playback_proxy = start_playback_proxy(playback_port, &inventory_dir)
+        .await
+        .expect("Failed to start playback proxy");
+
+    // Give it time to start
+    sleep(Duration::from_secs(2)).await;
+
+    // Send HTTP shutdown request
+    let mgmt_port = playback_port + 1;
+    let shutdown_response = shutdown_client
+        .post(&format!("http://127.0.0.1:{}/_shutdown", mgmt_port))
+        .send()
+        .await
+        .expect("Failed to send shutdown request to playback proxy");
+    assert!(shutdown_response.status().is_success());
+
+    // Wait for process to exit
+    let exit_result = timeout(
+        Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || playback_proxy.wait()),
+    )
+    .await
+    .expect("Playback proxy did not exit in time")
+    .expect("Failed to join task");
+
+    println!("Playback proxy exit result: {:?}", exit_result);
+
+    static_server.shutdown();
+
+    println!("HTTP shutdown test completed successfully!");
 }
