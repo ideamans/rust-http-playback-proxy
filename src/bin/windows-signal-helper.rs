@@ -7,11 +7,9 @@
 //! Returns exit code 0 on success, 1 on error.
 
 #[cfg(windows)]
-use std::io::{self, Write};
+use std::io;
 #[cfg(windows)]
-use windows::Win32::System::Console::{
-    GenerateConsoleCtrlEvent, CTRL_BREAK_EVENT, CTRL_C_EVENT,
-};
+use windows::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, GenerateConsoleCtrlEvent};
 
 #[cfg(not(windows))]
 fn main() {
@@ -65,8 +63,9 @@ fn main() {
 #[cfg(windows)]
 fn send_ctrl_break(pid: u32) -> io::Result<()> {
     unsafe {
-        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("GenerateConsoleCtrlEvent failed: {:?}", e)))?;
+        GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid).map_err(|e| {
+            io::Error::other(format!("GenerateConsoleCtrlEvent failed: {:?}", e))
+        })?;
     }
     Ok(())
 }
@@ -74,8 +73,9 @@ fn send_ctrl_break(pid: u32) -> io::Result<()> {
 #[cfg(windows)]
 fn send_ctrl_c(pid: u32) -> io::Result<()> {
     unsafe {
-        GenerateConsoleCtrlEvent(CTRL_C_EVENT, pid)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("GenerateConsoleCtrlEvent failed: {:?}", e)))?;
+        GenerateConsoleCtrlEvent(CTRL_C_EVENT, pid).map_err(|e| {
+            io::Error::other(format!("GenerateConsoleCtrlEvent failed: {:?}", e))
+        })?;
     }
     Ok(())
 }
