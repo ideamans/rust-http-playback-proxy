@@ -394,6 +394,47 @@ fn start_recording_proxy(
 }
 
 // Make HTTP request through proxy
+// Wait for proxy to be ready by checking port connectivity
+async fn wait_for_proxy(port: u16, max_retries: u32) -> Result<()> {
+    use tokio::net::TcpStream;
+    use tokio::time::timeout;
+
+    for i in 0..max_retries {
+        // Use short timeout for connection attempt to fail fast
+        match timeout(
+            Duration::from_millis(500),
+            TcpStream::connect(format!("127.0.0.1:{}", port)),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {
+                info!(
+                    "Proxy is ready on port {} (took {} seconds)",
+                    port,
+                    i + 1
+                );
+                return Ok(());
+            }
+            Ok(Err(_)) | Err(_) => {
+                if i == 0 {
+                    info!("Waiting for proxy to start on port {}...", port);
+                } else if (i + 1) % 10 == 0 {
+                    info!("Still waiting for proxy... ({}/{} seconds)", i + 1, max_retries);
+                }
+            }
+        }
+        if i < max_retries - 1 {
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+    anyhow::bail!(
+        "Proxy did not start on port {} after {} seconds. \
+         This may indicate the binary is still compiling or the proxy crashed during startup.",
+        port,
+        max_retries
+    )
+}
+
 async fn make_request(proxy_port: u16, url: &str) -> Result<()> {
     let client = reqwest::Client::builder()
         .proxy(reqwest::Proxy::http(format!(
@@ -798,8 +839,8 @@ async fn main() -> Result<()> {
     let mut recording_proxy =
         start_recording_proxy(&entry_url, recording_proxy_port, &inventory_dir)?;
 
-    // Wait for proxy to start
-    sleep(Duration::from_secs(2)).await;
+    // Wait for proxy to start (with retry logic for CI environments where build takes time)
+    wait_for_proxy(recording_proxy_port, 60).await?;
 
     // Make requests for HTML, CSS, and JS
     info!("Making request for HTML");
