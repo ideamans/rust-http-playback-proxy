@@ -190,13 +190,29 @@ pub fn minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<
             result
         }
         Some("text/css") => {
-            // Simple CSS minification
-            content_str
+            // Simple CSS minification - preserve @charset at the beginning
+            let mut lines: Vec<&str> = content_str
                 .lines()
                 .map(|line| line.trim())
                 .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join("")
+                .collect();
+
+            // Extract @charset if it exists (must be first line per CSS spec)
+            let charset_line = if !lines.is_empty() && lines[0].starts_with("@charset") {
+                Some(lines.remove(0))
+            } else {
+                None
+            };
+
+            // Minify the rest (join without separators)
+            let minified_body = lines.join("");
+
+            // Prepend @charset if it existed (must be first, separated by newline)
+            if let Some(charset) = charset_line {
+                format!("{}\n{}", charset, minified_body)
+            } else {
+                minified_body
+            }
         }
         Some("application/javascript") | Some("text/javascript") => {
             // Simple JS minification - remove extra whitespace and newlines
