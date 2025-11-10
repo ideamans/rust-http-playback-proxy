@@ -148,19 +148,14 @@ jobs:
 
       - name: E2E Performance Test
         if: matrix.test-type == 'e2e-performance'
-        shell: pwsh
-        run: |
-          # Use downloaded binary from root
-          & ./e2e/performance/target/release/performance.exe
+        working-directory: e2e/performance
+        run: cargo run --release
         timeout-minutes: 5
 
       - name: E2E Content Test
         if: matrix.test-type == 'e2e-content'
-        shell: bash
-        run: |
-          # Use downloaded binary from root
-          chmod +x ./e2e/content/target/release/content.exe
-          ./e2e/content/target/release/content.exe
+        working-directory: e2e/content
+        run: cargo run --release
         timeout-minutes: 5
 
       - name: Integration Test
