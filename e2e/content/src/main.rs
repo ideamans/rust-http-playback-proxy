@@ -741,6 +741,53 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+// Start playback proxy
+fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Child> {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .context("failed to resolve workspace root")?;
+
+    // Check if we're in CI environment (binary should be pre-built)
+    let use_prebuilt = std::env::var("CI").is_ok();
+
+    let child = if use_prebuilt {
+        // CI: Use pre-built binary directly
+        let binary_path = repo_root.join("target/release/http-playback-proxy");
+        #[cfg(windows)]
+        let binary_path = binary_path.with_extension("exe");
+
+        Command::new(binary_path)
+            .arg("playback")
+            .arg("--port")
+            .arg(proxy_port.to_string())
+            .arg("--inventory")
+            .arg(inventory_dir.to_str().unwrap())
+            .spawn()?
+    } else {
+        // Local: Use cargo run
+        let manifest_path = repo_root.join("Cargo.toml");
+        let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+
+        Command::new(cargo)
+            .arg("run")
+            .arg("--release")
+            .arg("--manifest-path")
+            .arg(manifest_path)
+            .arg("--bin")
+            .arg("http-playback-proxy")
+            .arg("--")
+            .arg("playback")
+            .arg("--port")
+            .arg(proxy_port.to_string())
+            .arg("--inventory")
+            .arg(inventory_dir.to_str().unwrap())
+            .spawn()?
+    };
+
+    Ok(child)
+}
+
 // Verify playback reproduces original charset and encoding
 async fn verify_playback_proxy(
     inventory_dir: &PathBuf,
@@ -750,32 +797,11 @@ async fn verify_playback_proxy(
 ) -> Result<()> {
     info!("\n--- Verifying Playback Charset/Encoding Reproduction ---");
 
-    // Start playback proxy using cargo run
-    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .context("failed to resolve workspace root")?;
-
-    let manifest_path = repo_root.join("Cargo.toml");
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-
-    let mut playback_proxy = Command::new(cargo)
-        .arg("run")
-        .arg("--release")
-        .arg("--manifest-path")
-        .arg(manifest_path)
-        .arg("--bin")
-        .arg("http-playback-proxy")
-        .arg("--")
-        .arg("playback")
-        .arg("--port")
-        .arg(playback_proxy_port.to_string())
-        .arg("--inventory")
-        .arg(inventory_dir.to_str().unwrap())
-        .spawn()?;
+    // Start playback proxy
+    let mut playback_proxy = start_playback_proxy(playback_proxy_port, inventory_dir)?;
 
     // Wait for playback proxy to start
-    sleep(Duration::from_secs(2)).await;
+    wait_for_proxy(playback_proxy_port, 30).await?;
 
     let client = reqwest::Client::builder()
         .proxy(reqwest::Proxy::http(format!(
