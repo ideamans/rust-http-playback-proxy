@@ -949,6 +949,74 @@ async fn verify_playback_proxy(
     }
     info!("  ✓ Gzip encoding reproduced in playback");
 
+    // Test charset-from-content resources (charset detected from HTML/CSS, not HTTP header)
+    info!("\nTesting charset-from-content HTML playback (Shift_JIS detected from <meta charset>)");
+    let response = client
+        .get(format!("http://{}:{}/charset-from-content/html-shiftjis.html", mock_server_host, mock_server_port))
+        .send()
+        .await?;
+
+    // HTTP header should NOT have charset (since original didn't have it)
+    let content_type = response.headers().get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if content_type.contains("charset") {
+        anyhow::bail!(
+            "Playback should NOT add charset to HTTP header when it wasn't in original, got: {}",
+            content_type
+        );
+    }
+    info!("  ✓ HTTP header has no charset (preserved from recording)");
+
+    let body_bytes = response.bytes().await?;
+    // Body should be Shift_JIS encoded (re-encoded from UTF-8 storage)
+    let (decoded, _, had_errors) = SHIFT_JIS.decode(&body_bytes);
+    if had_errors {
+        anyhow::bail!("Playback body is not valid Shift_JIS");
+    }
+    info!("  ✓ Playback body is valid Shift_JIS: {} bytes", body_bytes.len());
+
+    // Verify <meta charset> is preserved in the HTML
+    if !decoded.contains(r#"charset="Shift_JIS"#) && !decoded.contains(r#"charset="shift_jis"#) {
+        anyhow::bail!("Meta tag should still contain Shift_JIS charset declaration");
+    }
+    info!("  ✓ <meta charset> declaration preserved in playback");
+
+    // Test CSS charset-from-content
+    info!("\nTesting charset-from-content CSS playback (Shift_JIS detected from @charset)");
+    let response = client
+        .get(format!("http://{}:{}/charset-from-content/style-shiftjis.css", mock_server_host, mock_server_port))
+        .send()
+        .await?;
+
+    // HTTP header should NOT have charset (since original didn't have it)
+    let content_type = response.headers().get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if content_type.contains("charset") {
+        anyhow::bail!(
+            "Playback should NOT add charset to HTTP header when it wasn't in original, got: {}",
+            content_type
+        );
+    }
+    info!("  ✓ HTTP header has no charset (preserved from recording)");
+
+    let body_bytes = response.bytes().await?;
+    // Body should be Shift_JIS encoded (re-encoded from UTF-8 storage)
+    let (decoded, _, had_errors) = SHIFT_JIS.decode(&body_bytes);
+    if had_errors {
+        anyhow::bail!("Playback CSS body is not valid Shift_JIS");
+    }
+    info!("  ✓ Playback CSS body is valid Shift_JIS: {} bytes", body_bytes.len());
+
+    // Verify @charset declaration is preserved
+    if !decoded.contains(r#"@charset "Shift_JIS"#) && !decoded.contains(r#"@charset "shift_jis"#) {
+        anyhow::bail!("CSS should still contain Shift_JIS @charset declaration");
+    }
+    info!("  ✓ @charset declaration preserved in playback");
+
     // Stop playback proxy
     let _ = playback_proxy.kill();
     let _ = playback_proxy.wait();
