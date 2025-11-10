@@ -226,16 +226,15 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   args.push('--inventory', inventoryDir);
 
   // Start the process with piped stdout to capture port info
-  // On Windows, create new process group to enable Ctrl+C/Ctrl+Break events
+  // On Windows, use detached process to prevent signal broadcast to parent shell
   const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
-    detached: false,
+    detached: process.platform === 'win32',
   };
 
   if (process.platform === 'win32') {
     spawnOptions.windowsVerbatimArguments = false;
-    // CREATE_NEW_PROCESS_GROUP flag for Windows
-    spawnOptions.detached = false;
+    spawnOptions.windowsHide = true;
   }
 
   const proc = spawn(binaryPath, args, spawnOptions);
@@ -318,16 +317,15 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   args.push('--inventory', inventoryDir);
 
   // Start the process with piped stdout to capture port info
-  // On Windows, create new process group to enable Ctrl+C/Ctrl+Break events
+  // On Windows, use detached process to prevent signal broadcast to parent shell
   const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
-    detached: false,
+    detached: process.platform === 'win32',
   };
 
   if (process.platform === 'win32') {
     spawnOptions.windowsVerbatimArguments = false;
-    // CREATE_NEW_PROCESS_GROUP flag for Windows
-    spawnOptions.detached = false;
+    spawnOptions.windowsHide = true;
   }
 
   const proc = spawn(binaryPath, args, spawnOptions);
