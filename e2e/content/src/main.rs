@@ -745,6 +745,7 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
 async fn verify_playback_proxy(
     inventory_dir: &PathBuf,
     playback_proxy_port: u16,
+    mock_server_host: &str,
     mock_server_port: u16,
 ) -> Result<()> {
     info!("\n--- Verifying Playback Charset/Encoding Reproduction ---");
@@ -786,7 +787,7 @@ async fn verify_playback_proxy(
     // Test Shift_JIS charset reproduction
     info!("\nTesting Shift_JIS charset playback");
     let response = client
-        .get(format!("http://localhost:{}/charset/html-shiftjis.html", mock_server_port))
+        .get(format!("http://{}:{}/charset/html-shiftjis.html", mock_server_host, mock_server_port))
         .send()
         .await?;
 
@@ -819,7 +820,7 @@ async fn verify_playback_proxy(
     // Test Gzip encoding reproduction
     info!("\nTesting Gzip encoding playback");
     let response = client
-        .get(format!("http://localhost:{}/encoding/gzip.html", mock_server_port))
+        .get(format!("http://{}:{}/encoding/gzip.html", mock_server_host, mock_server_port))
         .send()
         .await?;
 
@@ -850,11 +851,13 @@ async fn main() -> Result<()> {
     info!("=== Content Beautification Acceptance Test ===");
     info!("Testing that minified HTML/CSS/JS are properly beautified during recording");
 
+    // Use 127.0.0.1 consistently to avoid IPv6/IPv4 mismatch on CI runners
+    const MOCK_SERVER_HOST: &str = "127.0.0.1";
     let mock_server_port = 18080;
     let recording_proxy_port = 18081;
 
     // Start mock HTTP server
-    info!("\nStarting mock HTTP server on port {}", mock_server_port);
+    info!("\nStarting mock HTTP server on {}:{}", MOCK_SERVER_HOST, mock_server_port);
     tokio::spawn(async move {
         if let Err(e) = start_mock_server(mock_server_port).await {
             error!("Mock server error: {:?}", e);
@@ -873,7 +876,7 @@ async fn main() -> Result<()> {
     // === Phase 1: Recording ===
     info!("\n--- Phase 1: Recording ---");
 
-    let entry_url = format!("http://localhost:{}/", mock_server_port);
+    let entry_url = format!("http://{}:{}/", MOCK_SERVER_HOST, mock_server_port);
     let mut recording_proxy =
         start_recording_proxy(&entry_url, recording_proxy_port, &inventory_dir)?;
 
@@ -882,36 +885,36 @@ async fn main() -> Result<()> {
 
     // Make requests for HTML, CSS, and JS
     info!("Making request for HTML");
-    make_request(recording_proxy_port, &format!("http://localhost:{}/", mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/", MOCK_SERVER_HOST, mock_server_port)).await?;
 
     info!("Making request for CSS");
-    make_request(recording_proxy_port, &format!("http://localhost:{}/style.css", mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/style.css", MOCK_SERVER_HOST, mock_server_port)).await?;
 
     info!("Making request for JavaScript");
-    make_request(recording_proxy_port, &format!("http://localhost:{}/script.js", mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/script.js", MOCK_SERVER_HOST, mock_server_port)).await?;
 
     // Make requests for charset tests
     info!("\nMaking requests for charset tests");
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/html-shiftjis.html", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/html-eucjp.html", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/html-utf8.html", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/style-shiftjis.css", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/style-eucjp.css", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/style-utf8.css", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/script-shiftjis.js", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/script-eucjp.js", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/charset/script-utf8.js", mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/html-shiftjis.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/html-eucjp.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/html-utf8.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/style-shiftjis.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/style-eucjp.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/style-utf8.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/script-shiftjis.js", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/script-eucjp.js", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset/script-utf8.js", MOCK_SERVER_HOST, mock_server_port)).await?;
 
     // Make requests for encoding tests
     info!("\nMaking requests for encoding tests");
-    make_request(recording_proxy_port, &format!("http://localhost:{}/encoding/gzip.html", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/encoding/br.html", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/encoding/deflate.html", mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/encoding/gzip.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/encoding/br.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/encoding/deflate.html", MOCK_SERVER_HOST, mock_server_port)).await?;
 
     // Make requests for combination tests
     info!("\nMaking requests for combination tests");
-    make_request(recording_proxy_port, &format!("http://localhost:{}/combo/shiftjis-gzip.html", mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://localhost:{}/combo/eucjp-br.html", mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/combo/shiftjis-gzip.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/combo/eucjp-br.html", MOCK_SERVER_HOST, mock_server_port)).await?;
 
     info!("\nAll requests completed");
 
@@ -966,7 +969,7 @@ async fn main() -> Result<()> {
     info!("\n--- Phase 3: Playback ---");
 
     let playback_proxy_port = 18082;
-    verify_playback_proxy(&inventory_dir, playback_proxy_port, mock_server_port).await?;
+    verify_playback_proxy(&inventory_dir, playback_proxy_port, MOCK_SERVER_HOST, mock_server_port).await?;
 
     info!("\n=================================");
     info!("  ALL CONTENT TESTS PASSED!");
