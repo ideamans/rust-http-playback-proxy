@@ -1,7 +1,7 @@
 {
   "name": "http-playback-proxy",
   "version": "0.2.0",
-  "description": "TypeScript/Node.js wrapper for HTTP Playback Proxy - HTTP traffic recording and playback with accurate timing",
+  "description": "HTTP traffic recording and playback proxy with precise timing control for PageSpeed optimization and performance testing",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -20,12 +20,20 @@
   },
   "keywords": [
     "http",
+    "https",
     "proxy",
     "playback",
     "recording",
     "performance",
     "testing",
-    "mitm"
+    "mitm",
+    "pagespeed",
+    "web-performance",
+    "timing",
+    "ttfb",
+    "network-simulation",
+    "replay",
+    "rust"
   ],
   "author": "PageSpeed Quest",
   "license": "MIT",
@@ -33,6 +41,10 @@
     "type": "git",
     "url": "https://github.com/pagespeed-quest/http-playback-proxy.git",
     "directory": "typescript"
+  },
+  "homepage": "https://github.com/pagespeed-quest/http-playback-proxy#readme",
+  "bugs": {
+    "url": "https://github.com/pagespeed-quest/http-playback-proxy/issues"
   },
   "dependencies": {
     "tar": "^7.0.0"
