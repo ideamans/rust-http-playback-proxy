@@ -135,7 +135,8 @@ jobs:
         with:
           toolchain: stable
 
-      - name: Download binary artifact
+      - name: Download binary artifact (Unix)
+        if: runner.os != 'Windows'
         uses: actions/download-artifact@v4
         with:
           name: binary-${{ matrix.platform }}
@@ -150,12 +151,6 @@ jobs:
         working-directory: e2e/performance
         run: make test
         timeout-minutes: 5
-
-      - name: Setup Rust (Windows E2E)
-        if: runner.os == 'Windows'
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
 
       - name: Run performance E2E test (Windows)
         if: runner.os == 'Windows'
@@ -187,13 +182,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Rust (Windows E2E)
-        if: runner.os == 'Windows'
+      - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
 
-      - name: Download binary artifact
+      - name: Download binary artifact (Unix)
+        if: runner.os != 'Windows'
         uses: actions/download-artifact@v4
         with:
           name: binary-${{ matrix.platform }}
