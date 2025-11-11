@@ -22,9 +22,6 @@ jobs:
           - os: macos-latest
             platform: darwin-arm64
             target: aarch64-apple-darwin
-          - os: windows-latest
-            platform: windows-amd64
-            target: x86_64-pc-windows-msvc
 
     runs-on: ${{ matrix.os }}
 
@@ -80,24 +77,11 @@ jobs:
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Build Windows signal helper
-        if: runner.os == 'Windows'
-        run: cargo build --release --bin windows-signal-helper --target ${{ matrix.target }}
-
-      - name: Prepare binary artifact (Unix)
-        if: runner.os != 'Windows'
+      - name: Prepare binary artifact
         run: |
           mkdir -p artifacts/${{ matrix.platform }}
           cp target/${{ matrix.target }}/release/http-playback-proxy artifacts/${{ matrix.platform }}/
           chmod +x artifacts/${{ matrix.platform }}/http-playback-proxy
-
-      - name: Prepare binary artifact (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path artifacts/${{ matrix.platform }}
-          Copy-Item target/${{ matrix.target }}/release/http-playback-proxy.exe artifacts/${{ matrix.platform }}/
-          Copy-Item target/${{ matrix.target }}/release/windows-signal-helper.exe artifacts/${{ matrix.platform }}/
 
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
@@ -117,8 +101,6 @@ jobs:
             platform: linux-amd64
           - os: macos-latest
             platform: darwin-arm64
-          - os: windows-latest
-            platform: windows-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -137,22 +119,12 @@ jobs:
           name: binary-${{ matrix.platform }}
           path: target/release/
 
-      - name: Make binary executable (Unix)
-        if: runner.os != 'Windows'
+      - name: Make binary executable
         run: chmod +x target/release/http-playback-proxy
 
-      - name: Run performance E2E test (Unix)
-        if: runner.os != 'Windows'
+      - name: Run performance E2E test
         working-directory: e2e/performance
         run: make test
-        timeout-minutes: 5
-
-      - name: Run performance E2E test (Windows)
-        if: runner.os == 'Windows'
-        working-directory: e2e/performance
-        shell: pwsh
-        run: |
-          cargo run --release
         timeout-minutes: 5
 
   e2e-content:
@@ -166,8 +138,6 @@ jobs:
             platform: linux-amd64
           - os: macos-latest
             platform: darwin-arm64
-          - os: windows-latest
-            platform: windows-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -186,23 +156,13 @@ jobs:
           name: binary-${{ matrix.platform }}
           path: target/release/
 
-      - name: Make binary executable (Unix)
-        if: runner.os != 'Windows'
+      - name: Make binary executable
         run: chmod +x target/release/http-playback-proxy
 
-      - name: Run content beautification E2E test (Unix)
-        if: runner.os != 'Windows'
+      - name: Run content beautification E2E test
         working-directory: e2e/content
         shell: bash
         run: ./run.sh
-        timeout-minutes: 5
-
-      - name: Run content beautification E2E test (Windows)
-        if: runner.os == 'Windows'
-        working-directory: e2e/content
-        shell: pwsh
-        run: |
-          cargo run --release
         timeout-minutes: 5
 
   e2e-integration:
@@ -216,8 +176,6 @@ jobs:
             platform: linux-amd64
           - os: macos-latest
             platform: darwin-arm64
-          - os: windows-latest
-            platform: windows-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -236,8 +194,7 @@ jobs:
           name: binary-${{ matrix.platform }}
           path: target/release/
 
-      - name: Make binary executable (Unix)
-        if: runner.os != 'Windows'
+      - name: Make binary executable
         run: chmod +x target/release/http-playback-proxy
 
       - name: Run integration tests
@@ -255,8 +212,6 @@ jobs:
             platform: linux-amd64
           - os: macos-latest
             platform: darwin-arm64
-          - os: windows-latest
-            platform: windows-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -275,8 +230,7 @@ jobs:
           name: binary-${{ matrix.platform }}
           path: golang/bin/${{ matrix.platform }}/
 
-      - name: Make binary executable (Unix)
-        if: runner.os != 'Windows'
+      - name: Make binary executable
         run: chmod +x golang/bin/${{ matrix.platform }}/http-playback-proxy
 
       - name: Download Go dependencies
@@ -300,8 +254,6 @@ jobs:
             platform: linux-amd64
           - os: macos-latest
             platform: darwin-arm64
-          - os: windows-latest
-            platform: windows-amd64
 
     runs-on: ${{ matrix.os }}
 
@@ -320,15 +272,8 @@ jobs:
           name: binary-${{ matrix.platform }}
           path: typescript/bin/${{ matrix.platform }}/
 
-      - name: Make binary executable (Unix)
-        if: runner.os != 'Windows'
+      - name: Make binary executable
         run: chmod +x typescript/bin/${{ matrix.platform }}/http-playback-proxy
-
-      - name: Verify binaries (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          Get-ChildItem -Recurse typescript/bin/${{ matrix.platform }}/ | Select-Object FullName
 
       - name: Install TypeScript wrapper dependencies
         working-directory: typescript
