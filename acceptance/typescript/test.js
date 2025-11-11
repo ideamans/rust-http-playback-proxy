@@ -249,6 +249,8 @@ describe('HTTP Playback Proxy Acceptance Test', () => {
     assert.ok(htmlBody1.length > 0, 'Response should not be empty');
 
     // Test 2: Reload inventory
+    // Wait a moment to ensure connection is fully closed (important for Windows)
+    await new Promise(resolve => setTimeout(resolve, 100));
     console.log('Testing reload...');
     const reloadMessage = await proxy.reload();
     console.log(`Reload successful: ${reloadMessage}`);
