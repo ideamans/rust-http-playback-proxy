@@ -19,3 +19,14 @@ func setProcAttributes(cmd *exec.Cmd) {
 func stopProcess(proc *os.Process) error {
 	return proc.Signal(syscall.SIGINT)
 }
+
+// isProcessRunning checks if a process is still running on Unix
+func isProcessRunning(proc *os.Process) bool {
+	if proc == nil || proc.Pid == -1 {
+		return false
+	}
+
+	// Signal(0) works reliably on Unix to check process existence
+	err := proc.Signal(syscall.Signal(0))
+	return err == nil
+}

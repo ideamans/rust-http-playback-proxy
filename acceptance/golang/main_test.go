@@ -373,6 +373,8 @@ func testShutdownAndReload(t *testing.T, serverURL string, inventoryDir string) 
 	t.Log("Verified proxy is serving requests")
 
 	// Test 2: Reload inventory
+	// Close idle connections to avoid EOF when reusing stale connections after reload (Windows issue)
+	client.CloseIdleConnections()
 	// Wait a moment to ensure connection is fully closed (important for Windows)
 	time.Sleep(100 * time.Millisecond)
 	t.Log("Testing reload...")

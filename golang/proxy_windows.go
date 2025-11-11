@@ -11,11 +11,15 @@ import (
 var (
 	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
 	procGenerateConsoleCtrlEvent = kernel32.NewProc("GenerateConsoleCtrlEvent")
+	procOpenProcess              = kernel32.NewProc("OpenProcess")
+	procCloseHandle              = kernel32.NewProc("CloseHandle")
 )
 
 const (
-	CTRL_C_EVENT     = 0
-	CTRL_BREAK_EVENT = 1
+	CTRL_C_EVENT        = 0
+	CTRL_BREAK_EVENT    = 1
+	PROCESS_QUERY_INFORMATION = 0x0400
+	SYNCHRONIZE         = 0x00100000
 )
 
 // setProcAttributes sets Windows-specific process attributes
@@ -51,4 +55,29 @@ func stopProcess(proc *os.Process) error {
 	}
 
 	return nil
+}
+
+// isProcessRunning checks if a process is still running on Windows
+// Signal(0) doesn't work reliably on Windows, so we use OpenProcess instead
+func isProcessRunning(proc *os.Process) bool {
+	if proc == nil || proc.Pid == -1 {
+		return false
+	}
+
+	// Try to open the process with PROCESS_QUERY_INFORMATION access
+	// If successful, the process exists
+	handle, _, _ := procOpenProcess.Call(
+		uintptr(PROCESS_QUERY_INFORMATION),
+		uintptr(0), // Don't inherit handle
+		uintptr(proc.Pid),
+	)
+
+	if handle == 0 {
+		// Failed to open process - it doesn't exist
+		return false
+	}
+
+	// Close the handle
+	procCloseHandle.Call(handle)
+	return true
 }
