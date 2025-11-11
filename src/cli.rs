@@ -34,13 +34,6 @@ pub enum Commands {
             help = "Inventory directory"
         )]
         inventory: PathBuf,
-
-        #[arg(
-            short,
-            long,
-            help = "Port for control/management API (enables HTTP shutdown endpoint)"
-        )]
-        control_port: Option<u16>,
     },
 
     #[command(about = "Playback recorded HTTP traffic")]
@@ -59,12 +52,5 @@ pub enum Commands {
             help = "Inventory directory"
         )]
         inventory: PathBuf,
-
-        #[arg(
-            short,
-            long,
-            help = "Port for control/management API (enables HTTP shutdown endpoint)"
-        )]
-        control_port: Option<u16>,
     },
 }

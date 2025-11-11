@@ -188,11 +188,10 @@ async fn start_mock_server(port: u16, resources: Arc<Vec<TestResource>>) -> Resu
     }
 }
 
-// Start recording proxy
+// Start recording proxy (no control port - uses signal-based shutdown)
 fn start_recording_proxy(
     entry_url: &str,
     proxy_port: u16,
-    control_port: u16,
     inventory_dir: &PathBuf,
 ) -> Result<Child> {
     // Use CARGO_MANIFEST_DIR to get workspace root
@@ -220,8 +219,6 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
-                .arg("--control-port")
-                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -234,8 +231,6 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
-            .arg("--control-port")
-            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -261,8 +256,6 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
-                .arg("--control-port")
-                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -282,8 +275,6 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
-            .arg("--control-port")
-            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -547,7 +538,6 @@ async fn main() -> Result<()> {
 
     let mock_server_port = 18080;
     let recording_proxy_port = 18081;
-    let recording_control_port = 19081;
     let playback_proxy_port = 18082;
     // Note: Tolerance removed as timing validation is currently disabled (see TODOs below)
 
@@ -574,7 +564,7 @@ async fn main() -> Result<()> {
     info!("\n=== Phase 1: Recording ===");
 
     let entry_url = format!("http://localhost:{}/small", mock_server_port);
-    let mut recording_proxy = start_recording_proxy(&entry_url, recording_proxy_port, recording_control_port, &inventory_dir)?;
+    let mut recording_proxy = start_recording_proxy(&entry_url, recording_proxy_port, &inventory_dir)?;
 
     // Wait for proxy to start (with retry logic for CI environments where build takes time)
     wait_for_proxy(recording_proxy_port, 60).await?;
@@ -608,22 +598,46 @@ async fn main() -> Result<()> {
 
     info!("All recording requests completed successfully");
 
-    // Send HTTP shutdown request to recording proxy
-    info!("Sending HTTP shutdown request to recording proxy");
-    let shutdown_url = format!("http://127.0.0.1:{}/_shutdown", recording_control_port);
-    let client = reqwest::Client::new();
-    match client.post(&shutdown_url).send().await {
-        Ok(_) => {
-            info!("HTTP shutdown request sent successfully");
-            // Wait for graceful shutdown
-            sleep(Duration::from_secs(3)).await;
-            let _ = recording_proxy.wait();
+    // Send signal-based shutdown to recording proxy
+    info!("Sending SIGTERM signal to recording proxy");
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{self, Signal};
+        use nix::unistd::Pid;
+        let pid = Pid::from_raw(recording_proxy.id() as i32);
+        match signal::kill(pid, Signal::SIGTERM) {
+            Ok(_) => {
+                info!("SIGTERM signal sent successfully");
+                // Wait for graceful shutdown
+                sleep(Duration::from_secs(3)).await;
+                let _ = recording_proxy.wait();
+            }
+            Err(e) => {
+                error!("Failed to send SIGTERM signal: {:?}", e);
+                // Fallback to force kill
+                let _ = recording_proxy.kill();
+                let _ = recording_proxy.wait();
+            }
         }
-        Err(e) => {
-            error!("Failed to send HTTP shutdown request: {:?}", e);
-            // Fallback to force kill
-            let _ = recording_proxy.kill();
-            let _ = recording_proxy.wait();
+    }
+
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Console::GenerateConsoleCtrlEvent;
+        use windows::Win32::System::Console::CTRL_BREAK_EVENT;
+        match unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, recording_proxy.id()) } {
+            Ok(_) => {
+                info!("CTRL_BREAK event sent successfully");
+                // Wait for graceful shutdown
+                sleep(Duration::from_secs(3)).await;
+                let _ = recording_proxy.wait();
+            }
+            Err(e) => {
+                error!("Failed to send CTRL_BREAK event: {:?}", e);
+                // Fallback to force kill
+                let _ = recording_proxy.kill();
+                let _ = recording_proxy.wait();
+            }
         }
     }
 

@@ -51,7 +51,6 @@ export interface RecordingOptions {
   port?: number;            // Optional: Port to use (default: 18080, will auto-search)
   deviceType?: DeviceType;  // Optional: Device type (default: 'mobile')
   inventoryDir?: string;    // Optional: Inventory directory (default: './inventory')
-  controlPort?: number;     // Optional: Control/management API port (enables HTTP shutdown)
 }
 
 /**
@@ -60,7 +59,6 @@ export interface RecordingOptions {
 export interface PlaybackOptions {
   port?: number;
   inventoryDir?: string;
-  controlPort?: number;     // Optional: Control/management API port (enables HTTP shutdown)
 }
 
 /**

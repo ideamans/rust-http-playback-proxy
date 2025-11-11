@@ -32,6 +32,7 @@ func setProcAttributes(cmd *exec.Cmd) {
 }
 
 // stopProcess sends Ctrl+Break event on Windows for graceful shutdown
+// CTRL_BREAK is the Windows equivalent of SIGTERM
 func stopProcess(proc *os.Process) error {
 	if proc == nil {
 		return nil
@@ -43,7 +44,7 @@ func stopProcess(proc *os.Process) error {
 	}
 
 	// Send CTRL_BREAK_EVENT to the process group
-	// This is the Windows equivalent of SIGINT for graceful shutdown
+	// This is the Windows equivalent of SIGTERM for graceful shutdown
 	r1, _, _ := procGenerateConsoleCtrlEvent.Call(
 		uintptr(CTRL_BREAK_EVENT),
 		uintptr(proc.Pid),

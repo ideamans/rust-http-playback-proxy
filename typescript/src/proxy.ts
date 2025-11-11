@@ -14,20 +14,17 @@ export class Proxy {
   public readonly deviceType?: string;
 
   private _port: number;
-  private _controlPort?: number;
   private process?: ChildProcess;
 
   constructor(
     mode: ProxyMode,
     port: number,
     inventoryDir: string,
-    controlPort?: number,
     entryUrl?: string,
     deviceType?: string
   ) {
     this.mode = mode;
     this._port = port;
-    this._controlPort = controlPort;
     this.inventoryDir = inventoryDir;
     this.entryUrl = entryUrl;
     this.deviceType = deviceType;
@@ -41,24 +38,10 @@ export class Proxy {
   }
 
   /**
-   * Get the control API port number (if enabled)
-   */
-  get controlPort(): number | undefined {
-    return this._controlPort;
-  }
-
-  /**
    * Update the port number (used internally when OS assigns a port)
    */
   updatePort(port: number): void {
     this._port = port;
-  }
-
-  /**
-   * Update the control port number (used internally when OS assigns a port)
-   */
-  updateControlPort(controlPort: number): void {
-    this._controlPort = controlPort;
   }
 
   /**
@@ -70,7 +53,8 @@ export class Proxy {
 
   /**
    * Stop the proxy gracefully
-   * Sends shutdown request via control API if available, otherwise uses SIGTERM
+   * Sends SIGTERM signal (cross-platform)
+   * Node.js automatically converts to appropriate signal on Windows (CTRL_BREAK)
    */
   async stop(): Promise<void> {
     if (!this.process) {
@@ -83,7 +67,7 @@ export class Proxy {
         return;
       }
 
-      // Set up timeout
+      // Set up timeout for forceful termination
       const timeout = setTimeout(() => {
         if (this.process) {
           this.process.kill('SIGKILL');
@@ -94,106 +78,24 @@ export class Proxy {
       // Listen for exit
       this.process.once('exit', (code, signal) => {
         clearTimeout(timeout);
-        // Exit code 0 is expected for clean shutdown
-        // Also accept null exit code and SIGINT signal
-        if (code === 0 || code === null || signal === 'SIGINT') {
+        // Accept clean exits: code 0, SIGTERM, SIGINT
+        if (code === 0 || code === null || signal === 'SIGTERM' || signal === 'SIGINT') {
           resolve();
         } else {
           reject(new Error(`Proxy exited with code ${code} signal ${signal}`));
         }
       });
 
-      // Send shutdown request via control API if enabled
-      if (this._controlPort) {
-        const http = require('http');
-        const req = http.request(
-          {
-            hostname: '127.0.0.1',
-            port: this._controlPort,
-            path: '/_shutdown',
-            method: 'POST',
-          },
-          (res: any) => {
-            // Response received, proxy should be shutting down
-            res.resume(); // Consume response
-          }
-        );
-
-        req.on('error', (err: Error) => {
-          // If HTTP request fails, fall back to SIGTERM
-          console.warn(`HTTP shutdown failed: ${err.message}, falling back to SIGTERM`);
-          try {
-            this.process?.kill('SIGTERM');
-          } catch {
-            // Ignore if already dead
-          }
-        });
-
-        req.end();
-      } else {
-        // No control port, use SIGTERM directly
-        try {
-          this.process.kill('SIGTERM');
-        } catch {
-          // Ignore if already dead
-        }
+      // Send platform-appropriate signal:
+      // Unix: SIGTERM (preferred for programmatic shutdown)
+      // Windows: SIGINT (maps to CTRL_C_EVENT, as Node.js doesn't support CTRL_BREAK)
+      const signal = process.platform === 'win32' ? 'SIGINT' : 'SIGTERM';
+      try {
+        this.process.kill(signal);
+      } catch (err) {
+        clearTimeout(timeout);
+        reject(err);
       }
-    });
-  }
-
-  /**
-   * Reload inventory (playback mode only)
-   * Sends reload request via control API
-   * Returns the reload status message from the server
-   */
-  async reload(): Promise<string> {
-    if (this.mode !== 'playback') {
-      throw new Error('Reload is only available in playback mode');
-    }
-
-    if (!this._controlPort) {
-      throw new Error('Reload requires control port to be configured');
-    }
-
-    if (!this.process || !this.isRunning()) {
-      throw new Error('Proxy is not running');
-    }
-
-    return new Promise((resolve, reject) => {
-      const http = require('http');
-      const req = http.request(
-        {
-          hostname: '127.0.0.1',
-          port: this._controlPort,
-          path: '/_reload',
-          method: 'POST',
-        },
-        (res: any) => {
-          let data = '';
-          res.on('data', (chunk: Buffer) => {
-            data += chunk.toString();
-          });
-
-          res.on('end', () => {
-            if (res.statusCode === 200) {
-              resolve(data.trim());
-            } else {
-              reject(new Error(`Reload failed with status ${res.statusCode}: ${data}`));
-            }
-          });
-        }
-      );
-
-      req.on('error', (err: Error) => {
-        reject(new Error(`Reload request failed: ${err.message}`));
-      });
-
-      req.setTimeout(30000, () => {
-        req.destroy();
-        reject(new Error('Reload request timed out after 30 seconds'));
-      });
-
-      req.end();
     });
   }
 
@@ -275,11 +177,7 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
-  // Add control port if specified
-  const controlPort = options.controlPort;
-  if (controlPort !== undefined) {
-    args.push('--control-port', controlPort.toString());
-  }
+  // Note: control-port removed from recording mode - uses signal-based shutdown only
 
   // Start the process with piped stdout to capture port info
   const spawnOptions: any = {
@@ -293,7 +191,7 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
 
   const proc = spawn(binaryPath, args, spawnOptions);
 
-  const proxy = new Proxy('recording', port, inventoryDir, controlPort, options.entryUrl, deviceType);
+  const proxy = new Proxy('recording', port, inventoryDir, options.entryUrl, deviceType);
   proxy.setProcess(proc);
 
   // Capture stdout to extract actual port number when using port 0
@@ -370,12 +268,6 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
-  // Add control port if specified
-  const controlPort = options.controlPort;
-  if (controlPort !== undefined) {
-    args.push('--control-port', controlPort.toString());
-  }
-
   // Start the process with piped stdout to capture port info
   const spawnOptions: any = {
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -388,7 +280,7 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
 
   const proc = spawn(binaryPath, args, spawnOptions);
 
-  const proxy = new Proxy('playback', port, inventoryDir, controlPort);
+  const proxy = new Proxy('playback', port, inventoryDir);
   proxy.setProcess(proc);
 
   // Capture stdout to extract actual port number when using port 0

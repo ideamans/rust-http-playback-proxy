@@ -42,7 +42,7 @@ build:
 	@echo ""
 
 # Run all E2E tests
-test-all: build test-performance test-minimum test-content
+test-all: build test-performance test-content
 	@echo ""
 	@echo "=========================================="
 	@echo "  ALL E2E TESTS PASSED!"

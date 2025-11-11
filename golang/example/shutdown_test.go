@@ -8,17 +8,16 @@ import (
 	proxy "github.com/pagespeed-quest/http-playback-proxy/golang"
 )
 
-// TestHTTPShutdown tests the HTTP shutdown functionality
-func TestHTTPShutdown(t *testing.T) {
-	// Test with recording proxy
-	t.Run("RecordingProxyHTTPShutdown", func(t *testing.T) {
+// TestSignalShutdown tests the signal-based shutdown functionality
+func TestSignalShutdown(t *testing.T) {
+	// Test with recording proxy (uses signal-based shutdown)
+	t.Run("RecordingProxySignalShutdown", func(t *testing.T) {
 		tmpDir := t.TempDir()
-		controlPort := 19081
 
 		p, err := proxy.StartRecording(proxy.RecordingOptions{
 			Port:         0, // Auto-assign port
 			InventoryDir: tmpDir,
-			ControlPort:  &controlPort,
+			// No ControlPort - uses signal-based shutdown (SIGTERM)
 		})
 		if err != nil {
 			t.Fatalf("Failed to start recording proxy: %v", err)
@@ -31,11 +30,11 @@ func TestHTTPShutdown(t *testing.T) {
 			t.Fatal("Proxy should be running")
 		}
 
-		fmt.Printf("Recording proxy started on port %d, control port %d\n", p.Port, *p.ControlPort)
+		fmt.Printf("Recording proxy started on port %d\n", p.Port)
 
-		// Stop using HTTP shutdown
+		// Stop using signal-based shutdown (SIGTERM on Unix, CTRL_BREAK on Windows)
 		if err := p.Stop(); err != nil {
-			t.Fatalf("Failed to stop proxy via HTTP: %v", err)
+			t.Fatalf("Failed to stop proxy via signal: %v", err)
 		}
 
 		// Verify it stopped
@@ -44,15 +43,14 @@ func TestHTTPShutdown(t *testing.T) {
 			t.Fatal("Proxy should have stopped")
 		}
 
-		fmt.Println("Recording proxy stopped successfully via HTTP shutdown")
+		fmt.Println("Recording proxy stopped successfully via signal shutdown")
 	})
 
 	// Test with playback proxy (needs inventory)
 	// This test is commented out as it requires a valid inventory
 	/*
-		t.Run("PlaybackProxyHTTPShutdown", func(t *testing.T) {
+		t.Run("PlaybackProxySignalShutdown", func(t *testing.T) {
 			tmpDir := t.TempDir()
-			controlPort := 19082
 
 			// Create a minimal inventory
 			inventoryPath := filepath.Join(tmpDir, "index.json")
@@ -66,7 +64,7 @@ func TestHTTPShutdown(t *testing.T) {
 			p, err := proxy.StartPlayback(proxy.PlaybackOptions{
 				Port:         0, // Auto-assign port
 				InventoryDir: tmpDir,
-				ControlPort:  &controlPort,
+				// No ControlPort - uses signal-based shutdown (SIGTERM)
 			})
 			if err != nil {
 				t.Fatalf("Failed to start playback proxy: %v", err)
@@ -79,11 +77,11 @@ func TestHTTPShutdown(t *testing.T) {
 				t.Fatal("Proxy should be running")
 			}
 
-			fmt.Printf("Playback proxy started on port %d, control port %d\n", p.Port, *p.ControlPort)
+			fmt.Printf("Playback proxy started on port %d\n", p.Port)
 
-			// Stop using HTTP shutdown
+			// Stop using signal-based shutdown (SIGTERM on Unix, CTRL_BREAK on Windows)
 			if err := p.Stop(); err != nil {
-				t.Fatalf("Failed to stop proxy via HTTP: %v", err)
+				t.Fatalf("Failed to stop proxy via signal: %v", err)
 			}
 
 			// Verify it stopped
@@ -92,7 +90,7 @@ func TestHTTPShutdown(t *testing.T) {
 				t.Fatal("Proxy should have stopped")
 			}
 
-			fmt.Println("Playback proxy stopped successfully via HTTP shutdown")
+			fmt.Println("Playback proxy stopped successfully via signal shutdown")
 		})
 	*/
 }
