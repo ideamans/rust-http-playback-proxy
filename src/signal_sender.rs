@@ -4,7 +4,7 @@
 //! across different platforms. On Windows, it uses native console control events
 //! (CTRL_C_EVENT, CTRL_BREAK_EVENT). On Unix, it uses standard signals (SIGTERM, SIGINT).
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 /// Signal kinds that can be sent to a process
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,6 +87,7 @@ fn send_signal_windows(pid: u32, kind: SignalKind) -> Result<()> {
 
 #[cfg(unix)]
 fn send_signal_unix(pid: u32, kind: SignalKind) -> Result<()> {
+    use anyhow::Context;
     use nix::sys::signal::{self, Signal};
     use nix::unistd::Pid;
 
