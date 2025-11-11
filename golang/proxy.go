@@ -335,6 +335,47 @@ func (p *Proxy) httpShutdown() error {
 	return nil
 }
 
+// Reload reloads the inventory from disk (playback mode only)
+// Requires control port to be configured
+// Returns the reload status message from the server
+func (p *Proxy) Reload() (string, error) {
+	if p.Mode != ModePlayback {
+		return "", fmt.Errorf("reload is only available in playback mode")
+	}
+
+	if p.ControlPort == nil {
+		return "", fmt.Errorf("reload requires control port to be configured")
+	}
+
+	if p.cmd == nil || p.cmd.Process == nil || !p.IsRunning() {
+		return "", fmt.Errorf("proxy is not running")
+	}
+
+	url := fmt.Sprintf("http://127.0.0.1:%d/_reload", *p.ControlPort)
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create reload request: %w", err)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to send reload request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("reload request failed with status: %d", resp.StatusCode)
+	}
+
+	// Read response body to get reload message
+	body := make([]byte, 1024)
+	n, _ := resp.Body.Read(body)
+	message := string(body[:n])
+
+	return message, nil
+}
+
 // waitForExit waits for the process to exit with proper error handling
 func (p *Proxy) waitForExit() error {
 	done := make(chan error, 1)
