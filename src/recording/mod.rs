@@ -3,6 +3,7 @@ use crate::utils::get_port_or_default;
 use anyhow::Result;
 use std::path::PathBuf;
 
+mod batch_processor;
 mod hudsucker_handler;
 mod processor;
 pub mod proxy;

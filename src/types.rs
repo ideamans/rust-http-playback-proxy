@@ -99,6 +99,11 @@ pub struct Resource {
     pub content_base64: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minify: Option<bool>,
+
+    // Raw body bytes (as received from upstream, possibly compressed)
+    // This field is used only during recording and is not serialized to index.json
+    #[serde(skip)]
+    pub raw_body: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ValueEnum, PartialEq)]
@@ -157,6 +162,7 @@ impl Resource {
             content_utf8: None,
             content_base64: None,
             minify: None,
+            raw_body: None,
         }
     }
 }
