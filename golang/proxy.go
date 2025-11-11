@@ -11,7 +11,6 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 )
 
