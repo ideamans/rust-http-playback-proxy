@@ -143,7 +143,12 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
                     });
 
                     if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-                        error!("Error serving connection: {}", e);
+                        // IncompleteMessage is normal when client closes connection early
+                        if e.is_incomplete_message() {
+                            info!("Management API client closed connection early");
+                        } else {
+                            error!("Error serving connection: {}", e);
+                        }
                     }
                 });
             }
@@ -173,7 +178,13 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
                                 )
                                 .await
                             {
-                                error!("Error serving connection: {:?}", err);
+                                // IncompleteMessage is normal when client closes connection early (especially on Windows)
+                                // This happens when we're waiting for target_close_time but client disconnects first
+                                if err.is_incomplete_message() {
+                                    info!("Client closed connection before target_close_time (normal on Windows)");
+                                } else {
+                                    error!("Error serving connection: {:?}", err);
+                                }
                             }
                         });
                     }
