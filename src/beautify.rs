@@ -5,9 +5,9 @@ use std::default::Default;
 
 /// Format JavaScript code using swc
 pub fn format_javascript(input: &str) -> Result<String> {
-    use swc_common::{sync::Lrc, FileName, SourceMap, GLOBALS};
-    use swc_ecma_codegen::{text_writer::JsWriter, Emitter, Config};
-    use swc_ecma_parser::{lexer::Lexer, Parser, StringInput, Syntax, EsSyntax};
+    use swc_common::{FileName, GLOBALS, SourceMap, sync::Lrc};
+    use swc_ecma_codegen::{Config, Emitter, text_writer::JsWriter};
+    use swc_ecma_parser::{EsSyntax, Parser, StringInput, Syntax, lexer::Lexer};
 
     use bytes_str::BytesStr;
 
@@ -147,7 +147,7 @@ fn pretty_html(handle: &Handle, depth: usize, out: &mut String) {
             // Attributes
             for a in attrs.borrow().iter() {
                 out.push(' ');
-                out.push_str(&a.name.local.to_string());
+                out.push_str(a.name.local.as_ref());
                 out.push_str("=\"");
                 // Escape attribute values
                 for ch in a.value.chars() {
@@ -236,7 +236,8 @@ mod tests {
 
     #[test]
     fn test_format_html_with_attributes() {
-        let minified = r#"<div id="test" class="container"><span data-value="123">Text</span></div>"#;
+        let minified =
+            r#"<div id="test" class="container"><span data-value="123">Text</span></div>"#;
         let formatted = format_html(minified).unwrap();
         assert!(formatted.contains("id=\"test\""));
         assert!(formatted.contains("class=\"container\""));

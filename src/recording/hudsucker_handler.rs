@@ -10,10 +10,8 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use super::processor::RequestProcessor;
-use crate::traits::{RealFileSystem, RealTimeProvider};
-use crate::types::{Inventory, Resource};
-use std::path::PathBuf;
+use crate::types::Inventory;
+use crate::types::Resource;
 
 #[derive(Debug, Clone)]
 struct RequestInfo {
@@ -26,7 +24,6 @@ struct RequestInfo {
 #[derive(Clone)]
 pub struct RecordingHandler {
     shared_inventory: Arc<Mutex<Inventory>>,
-    processor: Arc<RequestProcessor<RealFileSystem, RealTimeProvider>>,
     start_time: Arc<Instant>,
     // Connection-based FIFO queues: each client address has its own request queue
     // This handles HTTP/1.1 pipelining and ensures correct request-response pairing per connection
@@ -35,16 +32,9 @@ pub struct RecordingHandler {
 }
 
 impl RecordingHandler {
-    pub fn new(inventory: Inventory, inventory_dir: PathBuf) -> Self {
-        let processor = Arc::new(RequestProcessor::new(
-            inventory_dir,
-            Arc::new(RealFileSystem),
-            Arc::new(RealTimeProvider::new()),
-        ));
-
+    pub fn new(inventory: Inventory) -> Self {
         Self {
             shared_inventory: Arc::new(Mutex::new(inventory)),
-            processor,
             start_time: Arc::new(Instant::now()),
             request_infos: Arc::new(Mutex::new(HashMap::new())),
             request_counter: Arc::new(Mutex::new(0)),
@@ -142,7 +132,6 @@ impl HttpHandler for RecordingHandler {
         let start_time = Arc::clone(&self.start_time);
         let request_infos = Arc::clone(&self.request_infos);
         let shared_inventory = Arc::clone(&self.shared_inventory);
-        let processor = Arc::clone(&self.processor);
 
         async move {
             let headers = res.headers().clone();
@@ -154,7 +143,7 @@ impl HttpHandler for RecordingHandler {
 
             let (parts, body) = res.into_parts();
 
-            // Buffer the entire response body
+            // Buffer the entire response body (as-is, possibly compressed)
             let body_bytes = match body.collect().await {
                 Ok(collected) => collected.to_bytes(),
                 Err(e) => {
@@ -202,15 +191,10 @@ impl HttpHandler for RecordingHandler {
                 let download_end_elapsed =
                     download_end.duration_since(*start_time).as_millis() as u64;
                 let duration = download_end_elapsed.saturating_sub(elapsed);
-                (
-                    "GET".to_string(),
-                    "unknown".to_string(),
-                    elapsed,
-                    duration,
-                )
+                ("GET".to_string(), "unknown".to_string(), elapsed, duration)
             };
 
-            // Create resource
+            // Create resource with minimal processing
             let mut resource = Resource::new(method_str, url.clone());
             resource.status_code = Some(status.as_u16());
             resource.ttfb_ms = ttfb_ms;
@@ -245,7 +229,7 @@ impl HttpHandler for RecordingHandler {
             }
             resource.raw_headers = Some(resource_headers);
 
-            // Detect content-encoding
+            // Detect content-encoding (for later decompression during shutdown)
             #[allow(clippy::collapsible_if)]
             if let Some(encoding_header) = headers.get("content-encoding") {
                 if let Ok(encoding_str) = encoding_header.to_str() {
@@ -256,14 +240,31 @@ impl HttpHandler for RecordingHandler {
                 }
             }
 
-            // Process response body
+            // Extract content-type for later processing
             let content_type = headers.get("content-type").and_then(|v| v.to_str().ok());
-            if let Err(e) = processor
-                .process_response_body(&mut resource, &body_bytes, content_type)
-                .await
-            {
-                error!("Failed to process response body: {}", e);
+            if let Some(ct) = content_type {
+                resource.content_type_mime =
+                    Some(ct.split(';').next().unwrap_or(ct).trim().to_string());
             }
+
+            // Calculate mbps (megabits per second) from body size and duration
+            // Use compressed body size (what was actually transferred)
+            let body_size = body_bytes.len() as f64;
+            #[allow(clippy::collapsible_if)]
+            if let Some(dur_ms) = resource.duration_ms {
+                if dur_ms > 0 {
+                    let seconds = (dur_ms as f64) / 1000.0;
+                    if seconds > 0.0 {
+                        // bytes/s -> bits/s -> Mb/s (megabits per second)
+                        let bytes_per_second = body_size / seconds;
+                        let bits_per_second = bytes_per_second * 8.0;
+                        resource.mbps = Some(bits_per_second / (1000.0 * 1000.0));
+                    }
+                }
+            }
+
+            // Store raw body (as-is, possibly compressed) for later processing
+            resource.raw_body = Some(body_bytes.to_vec());
 
             // Add resource to inventory
             {

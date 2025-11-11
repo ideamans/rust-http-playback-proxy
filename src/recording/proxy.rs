@@ -5,8 +5,9 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info};
 
+use super::batch_processor::BatchProcessor;
 use super::hudsucker_handler::RecordingHandler;
-use crate::traits::{FileSystem, RealFileSystem};
+use crate::traits::{FileSystem, RealFileSystem, RealTimeProvider};
 use crate::types::Inventory;
 
 use hudsucker::{
@@ -45,7 +46,7 @@ pub async fn start_recording_proxy(
     let ca = RcgenAuthority::new(issuer, 1_000, aws_lc_rs::default_provider());
 
     // Create the recording handler
-    let handler = RecordingHandler::new(inventory, inventory_dir.clone());
+    let handler = RecordingHandler::new(inventory);
     let handler_inventory = handler.get_inventory();
 
     // Build the proxy with standard TLS configuration
@@ -153,13 +154,30 @@ pub async fn start_recording_proxy(
         let _ = shutdown_tx_clone.send(());
 
         // Wait a bit for in-flight requests to complete
-        // This ensures all resources are recorded before saving inventory
+        // This ensures all resources are recorded before processing
         info!("Waiting for in-flight requests to complete...");
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        info!("Saving inventory...");
+        info!("Processing resources...");
 
-        let inventory = handler_inventory_clone.lock().await;
+        // Get mutable access to inventory for batch processing
+        let mut inventory = handler_inventory_clone.lock().await;
+
+        // Batch process all resources
+        let batch_processor = BatchProcessor::new(
+            inventory_dir_clone.clone(),
+            Arc::new(RealFileSystem),
+            Arc::new(RealTimeProvider::new()),
+        );
+
+        if let Err(e) = batch_processor.process_all(&mut inventory).await {
+            error!("Failed to batch process resources: {}", e);
+        } else {
+            info!("All resources processed successfully");
+        }
+
+        // Save inventory after processing
+        info!("Saving inventory...");
         if let Err(e) = save_inventory(&inventory, &inventory_dir_clone).await {
             error!("Failed to save inventory: {}", e);
         } else {
@@ -167,40 +185,6 @@ pub async fn start_recording_proxy(
                 "Inventory saved successfully with {} resources",
                 inventory.resources.len()
             );
-        }
-
-        // Wait for async file writes to complete before exiting
-        // Check for content files every second, up to 10 times
-        let mut all_files_exist = false;
-
-        for attempt in 1..=10 {
-            let mut missing_count = 0;
-
-            // Check if all resources have their content files saved
-            for resource in &inventory.resources {
-                if let Some(content_path) = &resource.content_file_path {
-                    let full_path = inventory_dir_clone.join(content_path);
-                    if !tokio::fs::try_exists(&full_path).await.unwrap_or(false) {
-                        missing_count += 1;
-                    }
-                }
-            }
-
-            if missing_count == 0 {
-                info!("All content files verified (attempt {})", attempt);
-                all_files_exist = true;
-                break;
-            } else {
-                info!(
-                    "Waiting for {} content files to be written (attempt {}/10)",
-                    missing_count, attempt
-                );
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            }
-        }
-
-        if !all_files_exist {
-            error!("Some content files may not have been written after 10 seconds");
         }
     });
 

@@ -131,20 +131,16 @@ pub fn extract_charset_from_html(content: &[u8]) -> Option<String> {
     // Pattern 1: <meta charset="xxx">
     if let Some(pos) = content_lower.find("<meta charset=") {
         let after_equals = &content_lower[pos + 14..];
-        let charset = if after_equals.starts_with('"') {
+        let charset = if let Some(stripped) = after_equals.strip_prefix('"') {
             // charset="xxx"
-            if let Some(end_quote) = after_equals[1..].find('"') {
-                Some(after_equals[1..=end_quote].to_string())
-            } else {
-                None
-            }
-        } else if after_equals.starts_with('\'') {
+            stripped
+                .find('"')
+                .map(|end_quote| stripped[..end_quote].to_string())
+        } else if let Some(stripped) = after_equals.strip_prefix('\'') {
             // charset='xxx'
-            if let Some(end_quote) = after_equals[1..].find('\'') {
-                Some(after_equals[1..=end_quote].to_string())
-            } else {
-                None
-            }
+            stripped
+                .find('\'')
+                .map(|end_quote| stripped[..end_quote].to_string())
         } else {
             // charset=xxx (no quotes)
             let end = after_equals
@@ -164,15 +160,15 @@ pub fn extract_charset_from_html(content: &[u8]) -> Option<String> {
         if let Some(content_pos) = after_equiv.find("content=") {
             let after_content = &after_equiv[content_pos + 8..];
             // Extract the content attribute value
-            let content_value = if after_content.starts_with('"') {
-                if let Some(end_quote) = after_content[1..].find('"') {
-                    &after_content[1..=end_quote]
+            let content_value = if let Some(stripped) = after_content.strip_prefix('"') {
+                if let Some(end_quote) = stripped.find('"') {
+                    &stripped[..end_quote]
                 } else {
                     ""
                 }
-            } else if after_content.starts_with('\'') {
-                if let Some(end_quote) = after_content[1..].find('\'') {
-                    &after_content[1..=end_quote]
+            } else if let Some(stripped) = after_content.strip_prefix('\'') {
+                if let Some(end_quote) = stripped.find('\'') {
+                    &stripped[..end_quote]
                 } else {
                     ""
                 }
@@ -204,20 +200,16 @@ pub fn extract_charset_from_css(content: &[u8]) -> Option<String> {
     if let Some(pos) = content_lower.find("@charset") {
         let after_charset = &content_lower[pos + 8..].trim_start();
 
-        let charset = if after_charset.starts_with('"') {
+        let charset = if let Some(stripped) = after_charset.strip_prefix('"') {
             // @charset "xxx";
-            if let Some(end_quote) = after_charset[1..].find('"') {
-                Some(after_charset[1..=end_quote].to_string())
-            } else {
-                None
-            }
-        } else if after_charset.starts_with('\'') {
+            stripped
+                .find('"')
+                .map(|end_quote| stripped[..end_quote].to_string())
+        } else if let Some(stripped) = after_charset.strip_prefix('\'') {
             // @charset 'xxx';
-            if let Some(end_quote) = after_charset[1..].find('\'') {
-                Some(after_charset[1..=end_quote].to_string())
-            } else {
-                None
-            }
+            stripped
+                .find('\'')
+                .map(|end_quote| stripped[..end_quote].to_string())
         } else {
             None
         };

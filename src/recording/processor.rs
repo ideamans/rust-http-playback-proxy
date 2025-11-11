@@ -20,6 +20,7 @@ pub struct RequestProcessor<F: FileSystem, T: TimeProvider> {
 }
 
 impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
+    #[allow(dead_code)] // Kept for potential future use or tests
     pub fn new(inventory_dir: PathBuf, file_system: Arc<F>, time_provider: Arc<T>) -> Self {
         let contents_dir = inventory_dir.join("contents");
         Self {
