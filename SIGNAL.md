@@ -66,7 +66,7 @@ kill $PID       # SIGTERM (programmatic)
 
 ## Signal Subcommand (Internal Helper)
 
-The `signal` subcommand is an internal helper for sending signals across platforms, primarily designed to solve Windows limitations in language wrappers.
+The `signal` subcommand is an internal helper for sending signals across platforms.
 
 **Usage:**
 ```bash
@@ -85,13 +85,17 @@ http-playback-proxy signal --pid <PID> --kind int
 
 **Why This Exists:**
 
-On Windows, Node.js's `process.kill('SIGTERM')` actually performs a force kill (taskkill), not a graceful shutdown. The `signal` subcommand uses Windows native APIs (`AttachConsole`, `GenerateConsoleCtrlEvent`) to properly send console control events to the target process group.
+On Unix, this subcommand provides a simple way to send signals using `kill(2)`.
 
-On Unix, this subcommand simply calls `kill(2)` with the appropriate signal, providing a unified interface across platforms.
+On Windows, this was originally intended to send console control events using native APIs (`AttachConsole`, `GenerateConsoleCtrlEvent`), but this approach has limitations: `AttachConsole` can only attach to processes in the same console session, which fails when called from Node.js child processes or different console sessions.
+
+**Current Limitation:**
+
+Due to Windows console session restrictions, the signal subcommand cannot reliably send signals to child processes on Windows. Language wrappers should use `process.kill('SIGINT')` on Windows instead, which Node.js converts to CTRL_C_EVENT.
 
 **Internal Use Only:**
 
-This subcommand is hidden from the main help (`--help`) and is intended for use by language wrappers (TypeScript, Go) only. It is documented here for maintainers and wrapper developers.
+This subcommand is hidden from the main help (`--help`) and is documented here for maintainers and wrapper developers.
 
 ## Implementation Details
 
@@ -284,21 +288,13 @@ export class Proxy {
 
       // Send platform-appropriate signal:
       // Unix: SIGTERM (standard kill signal)
-      // Windows: Use signal subcommand to send CTRL_BREAK via Windows API
+      // Windows: SIGINT (CTRL_C_EVENT) - Node.js limitation, cannot send CTRL_BREAK
       try {
         if (process.platform === 'win32') {
-          // On Windows, use the signal subcommand to send CTRL_BREAK
-          const binaryPath = getFullBinaryPath();
-          const { spawnSync } = require('child_process');
-          const result = spawnSync(
-            binaryPath,
-            ['signal', '--pid', this.process.pid.toString(), '--kind', 'ctrl-break'],
-            { stdio: 'pipe' }
-          );
-          if (result.status !== 0) {
-            reject(new Error(`Signal command failed: ${result.stderr?.toString() || ''}`));
-            return;
-          }
+          // On Windows, use SIGINT which Node.js converts to CTRL_C_EVENT
+          // Node.js cannot send CTRL_BREAK_EVENT, and the signal subcommand
+          // cannot attach to processes in different console sessions
+          this.process.kill('SIGINT');
         } else {
           // On Unix, use standard SIGTERM
           this.process.kill('SIGTERM');

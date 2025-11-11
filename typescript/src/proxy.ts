@@ -88,34 +88,13 @@ export class Proxy {
 
       // Send platform-appropriate signal:
       // Unix: SIGTERM (standard kill signal)
-      // Windows: Use signal subcommand to send CTRL_BREAK via Windows API
+      // Windows: SIGINT (CTRL_C_EVENT) - Node.js limitation, cannot send CTRL_BREAK
       try {
         if (process.platform === 'win32') {
-          // On Windows, use the signal subcommand to send CTRL_BREAK
-          // This ensures proper console event delivery to the process group
-          const binaryPath = getFullBinaryPath();
-          const { spawnSync } = require('child_process');
-          const result = spawnSync(
-            binaryPath,
-            ['signal', '--pid', this.process.pid!.toString(), '--kind', 'ctrl-break'],
-            { stdio: 'pipe' }
-          );
-
-          if (result.error) {
-            clearTimeout(timeout);
-            reject(new Error(`Failed to send signal: ${result.error.message}`));
-            return;
-          }
-
-          if (result.status !== 0) {
-            clearTimeout(timeout);
-            reject(
-              new Error(
-                `Signal command failed with exit code ${result.status}: ${result.stderr?.toString() || ''}`
-              )
-            );
-            return;
-          }
+          // On Windows, use SIGINT which Node.js converts to CTRL_C_EVENT
+          // Node.js cannot send CTRL_BREAK_EVENT, and the signal subcommand
+          // cannot attach to processes in different console sessions
+          this.process.kill('SIGINT');
         } else {
           // On Unix, use standard SIGTERM
           this.process.kill('SIGTERM');
