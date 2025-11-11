@@ -142,6 +142,62 @@ export class Proxy {
   }
 
   /**
+   * Reload inventory (playback mode only)
+   * Sends reload request via control API
+   * Returns the reload status message from the server
+   */
+  async reload(): Promise<string> {
+    if (this.mode !== 'playback') {
+      throw new Error('Reload is only available in playback mode');
+    }
+
+    if (!this._controlPort) {
+      throw new Error('Reload requires control port to be configured');
+    }
+
+    if (!this.process || !this.isRunning()) {
+      throw new Error('Proxy is not running');
+    }
+
+    return new Promise((resolve, reject) => {
+      const http = require('http');
+      const req = http.request(
+        {
+          hostname: '127.0.0.1',
+          port: this._controlPort,
+          path: '/_reload',
+          method: 'POST',
+        },
+        (res: any) => {
+          let data = '';
+          res.on('data', (chunk: Buffer) => {
+            data += chunk.toString();
+          });
+
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              resolve(data.trim());
+            } else {
+              reject(new Error(`Reload failed with status ${res.statusCode}: ${data}`));
+            }
+          });
+        }
+      );
+
+      req.on('error', (err: Error) => {
+        reject(new Error(`Reload request failed: ${err.message}`));
+      });
+
+      req.setTimeout(30000, () => {
+        req.destroy();
+        reject(new Error('Reload request timed out after 30 seconds'));
+      });
+
+      req.end();
+    });
+  }
+
+  /**
    * Check if the proxy is still running
    */
   isRunning(): boolean {

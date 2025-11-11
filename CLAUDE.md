@@ -73,12 +73,18 @@ This ensures code quality matches CI requirements exactly and prevents broken co
 # Playback mode
 ./target/release/http-playback-proxy playback \
   --port <port> \
-  --inventory <inventory_dir>
+  --inventory <inventory_dir> \
+  --control-port <control_port>
 
 # Defaults:
 # - Port: auto-search from 8080
 # - Device: mobile
 # - Inventory: ./inventory
+# - Control-port: none (optional)
+
+# Control API (when control-port is specified):
+# - POST /_shutdown - Gracefully shutdown playback proxy
+# - POST /_reload - Reload inventory from disk (atomic swap)
 ```
 
 ## Architecture
@@ -138,6 +144,9 @@ Framework-free trait-based DI for testability:
 5. Replay with timing control:
    - Wait until TTFB
    - Send chunks according to `targetTime` (simulating original transfer speed)
+6. Control API (optional, via `--control-port`):
+   - `POST /_shutdown` - Gracefully shutdown proxy
+   - `POST /_reload` - Reload inventory from disk (atomic swap using `Arc<RwLock<Arc<Vec<Transaction>>>>`)
 
 ### Data Type Compatibility
 

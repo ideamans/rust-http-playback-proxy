@@ -80,6 +80,11 @@ func TestAcceptance(t *testing.T) {
 	t.Run("Playback", func(t *testing.T) {
 		testPlayback(t, serverURL, inventoryDir)
 	})
+
+	// Test 4: Shutdown and Reload
+	t.Run("ShutdownAndReload", func(t *testing.T) {
+		testShutdownAndReload(t, serverURL, inventoryDir)
+	})
 }
 
 func testRecording(t *testing.T, serverURL string, inventoryDir string) {
@@ -320,4 +325,81 @@ func testPlayback(t *testing.T, serverURL string, inventoryDir string) {
 	}
 
 	t.Log("Playback test passed")
+}
+
+func testShutdownAndReload(t *testing.T, serverURL string, inventoryDir string) {
+	t.Log("Testing shutdown and reload...")
+
+	// Use random control port
+	controlPort := 21000 + (os.Getpid() % 1000)
+
+	// Start playback proxy with control port
+	p, err := proxy.StartPlayback(proxy.PlaybackOptions{
+		Port:         0,
+		InventoryDir: inventoryDir,
+		ControlPort:  &controlPort,
+	})
+	if err != nil {
+		t.Fatalf("Failed to start playback proxy: %v", err)
+	}
+	defer func() {
+		if p.IsRunning() {
+			p.Stop()
+		}
+	}()
+
+	t.Logf("Playback proxy started on port %d, control port %d", p.Port, controlPort)
+
+	// Wait for proxy to be ready
+	time.Sleep(1 * time.Second)
+
+	// Test 1: Verify proxy is running and serving
+	proxyURL := fmt.Sprintf("http://127.0.0.1:%d", p.Port)
+	proxyURLParsed, _ := url.Parse(proxyURL)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: func(req *http.Request) (*url.URL, error) {
+				return proxyURLParsed, nil
+			},
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get(serverURL + "/")
+	if err != nil {
+		t.Fatalf("Failed to fetch through proxy: %v", err)
+	}
+	resp.Body.Close()
+	t.Log("Verified proxy is serving requests")
+
+	// Test 2: Reload inventory
+	t.Log("Testing reload...")
+	message, err := p.Reload()
+	if err != nil {
+		t.Fatalf("Failed to reload: %v", err)
+	}
+	t.Logf("Reload successful: %s", message)
+
+	// Verify proxy still works after reload
+	resp, err = client.Get(serverURL + "/")
+	if err != nil {
+		t.Fatalf("Failed to fetch after reload: %v", err)
+	}
+	resp.Body.Close()
+	t.Log("Verified proxy works after reload")
+
+	// Test 3: Shutdown via HTTP
+	t.Log("Testing shutdown via control API...")
+	if err := p.Stop(); err != nil {
+		t.Fatalf("Failed to shutdown proxy: %v", err)
+	}
+
+	// Verify proxy stopped
+	time.Sleep(500 * time.Millisecond)
+	if p.IsRunning() {
+		t.Fatal("Proxy should have stopped")
+	}
+	t.Log("Verified proxy stopped successfully")
+
+	t.Log("Shutdown and reload test passed")
 }

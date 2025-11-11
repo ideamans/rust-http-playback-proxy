@@ -225,6 +225,49 @@ describe('HTTP Playback Proxy Acceptance Test', () => {
 
     console.log('Playback test passed');
   });
+
+  it('should test reload', async () => {
+    console.log('Testing reload...');
+
+    // Use random control port
+    const controlPort = 21000 + (process.pid % 1000);
+
+    // Start playback proxy with control port
+    const proxy = await startPlayback({
+      inventoryDir: join(inventoryDir, 'inventory'),
+      controlPort: controlPort,
+    });
+
+    console.log(`Playback proxy started on port ${proxy.port}, control port ${proxy.controlPort}`);
+
+    // Wait for proxy to be ready
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Test 1: Verify proxy is running and serving
+    const htmlBody1 = await makeRequest(serverUrl + '/', '127.0.0.1', proxy.port);
+    console.log('Verified proxy is serving requests');
+    assert.ok(htmlBody1.length > 0, 'Response should not be empty');
+
+    // Test 2: Reload inventory
+    console.log('Testing reload...');
+    const reloadMessage = await proxy.reload();
+    console.log(`Reload successful: ${reloadMessage}`);
+
+    // Verify proxy still works after reload
+    const htmlBody2 = await makeRequest(serverUrl + '/', '127.0.0.1', proxy.port);
+    console.log('Verified proxy works after reload');
+    assert.ok(htmlBody2.length > 0, 'Response after reload should not be empty');
+
+    // Test 3: Shutdown via HTTP
+    console.log('Testing shutdown via control API...');
+    await proxy.stop();
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.ok(!proxy.isRunning(), 'Proxy should have stopped');
+    console.log('Verified proxy stopped successfully');
+
+    console.log('Reload test passed');
+  });
 });
 
 // Helper function to make HTTP request through proxy

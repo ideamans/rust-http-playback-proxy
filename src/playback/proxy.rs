@@ -7,18 +7,22 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
-use tokio::sync::broadcast;
+use tokio::sync::{RwLock, broadcast};
 use tracing::{error, info};
 
+use crate::traits::FileSystem;
 use crate::types::Transaction;
 
-pub async fn start_playback_proxy(
+pub async fn start_playback_proxy<F: FileSystem + 'static>(
     port: u16,
     transactions: Vec<Transaction>,
     control_port: Option<u16>,
+    inventory_dir: PathBuf,
+    file_system: Arc<F>,
 ) -> Result<()> {
     let addr = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&addr).await?;
@@ -27,34 +31,75 @@ pub async fn start_playback_proxy(
 
     info!("Playback proxy listening on 127.0.0.1:{}", actual_port);
 
-    let shared_transactions = Arc::new(transactions);
+    // Use Arc<RwLock<Arc<Vec<Transaction>>>> for atomic swapping
+    let shared_transactions = Arc::new(RwLock::new(Arc::new(transactions)));
     let start_time = Arc::new(Instant::now());
 
     // Create shutdown channel
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let mut main_shutdown_rx = shutdown_tx.subscribe();
 
-    // Start management API server for shutdown (only if control_port is specified)
+    // Start management API server for shutdown and reload (only if control_port is specified)
     if let Some(mgmt_port) = control_port {
         let mgmt_shutdown_tx = shutdown_tx.clone();
+        let mgmt_transactions = shared_transactions.clone();
+        let mgmt_inventory_dir = inventory_dir.clone();
+        let mgmt_file_system = file_system.clone();
+
         tokio::spawn(async move {
             use http_body_util::Full;
             use hyper::body::Bytes;
             use std::convert::Infallible;
 
-            async fn handle_mgmt_request(
+            async fn handle_mgmt_request<F: FileSystem>(
                 req: Request<Incoming>,
                 shutdown_tx: broadcast::Sender<()>,
+                transactions: Arc<RwLock<Arc<Vec<Transaction>>>>,
+                inventory_dir: PathBuf,
+                file_system: Arc<F>,
             ) -> Result<Response<Full<Bytes>>, Infallible> {
-                if req.uri().path() == "/_shutdown" && req.method() == hyper::Method::POST {
-                    info!("Received shutdown request via management API");
-                    let _ = shutdown_tx.send(());
-                    Ok(Response::new(Full::new(Bytes::from("Shutting down...\n"))))
-                } else {
-                    Ok(Response::builder()
+                match (req.uri().path(), req.method()) {
+                    ("/_shutdown", &hyper::Method::POST) => {
+                        info!("Received shutdown request via management API");
+                        let _ = shutdown_tx.send(());
+                        Ok(Response::new(Full::new(Bytes::from("Shutting down...\n"))))
+                    }
+                    ("/_reload", &hyper::Method::POST) => {
+                        info!("Received reload request via management API");
+
+                        // Load inventory and convert to transactions in background
+                        match reload_transactions(&inventory_dir, file_system.clone()).await {
+                            Ok(new_transactions) => {
+                                let count = new_transactions.len();
+
+                                // Atomic swap: write new Arc
+                                {
+                                    let mut txn_write = transactions.write().await;
+                                    *txn_write = Arc::new(new_transactions);
+                                }
+
+                                info!("Successfully reloaded {} transactions", count);
+                                Ok(Response::new(Full::new(Bytes::from(format!(
+                                    "Reloaded {} transactions\n",
+                                    count
+                                )))))
+                            }
+                            Err(e) => {
+                                error!("Failed to reload transactions: {}", e);
+                                Ok(Response::builder()
+                                    .status(500)
+                                    .body(Full::new(Bytes::from(format!(
+                                        "Failed to reload: {}\n",
+                                        e
+                                    ))))
+                                    .unwrap())
+                            }
+                        }
+                    }
+                    _ => Ok(Response::builder()
                         .status(404)
                         .body(Full::new(Bytes::from("Not found\n")))
-                        .unwrap())
+                        .unwrap()),
                 }
             }
 
@@ -67,7 +112,7 @@ pub async fn start_playback_proxy(
                 }
             };
             info!(
-                "Management API listening on http://127.0.0.1:{} (POST /_shutdown to stop)",
+                "Management API listening on http://127.0.0.1:{} (POST /_shutdown to stop, POST /_reload to reload inventory)",
                 mgmt_port
             );
 
@@ -82,10 +127,20 @@ pub async fn start_playback_proxy(
 
                 let io = TokioIo::new(stream);
                 let shutdown_tx = mgmt_shutdown_tx.clone();
+                let transactions = mgmt_transactions.clone();
+                let inventory_dir = mgmt_inventory_dir.clone();
+                let file_system = mgmt_file_system.clone();
 
                 tokio::spawn(async move {
-                    let service =
-                        service_fn(move |req| handle_mgmt_request(req, shutdown_tx.clone()));
+                    let service = service_fn(move |req| {
+                        handle_mgmt_request(
+                            req,
+                            shutdown_tx.clone(),
+                            transactions.clone(),
+                            inventory_dir.clone(),
+                            file_system.clone(),
+                        )
+                    });
 
                     if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
                         error!("Error serving connection: {}", e);
@@ -138,9 +193,30 @@ pub async fn start_playback_proxy(
     Ok(())
 }
 
+async fn reload_transactions<F: FileSystem>(
+    inventory_dir: &PathBuf,
+    file_system: Arc<F>,
+) -> Result<Vec<Transaction>> {
+    use super::{load_inventory, transaction};
+
+    info!("Reloading inventory from {:?}", inventory_dir);
+    let inventory = load_inventory(inventory_dir, file_system.clone()).await?;
+    info!(
+        "Loaded {} resources from inventory",
+        inventory.resources.len()
+    );
+
+    let transactions =
+        transaction::convert_resources_to_transactions(&inventory, inventory_dir, file_system)
+            .await?;
+    info!("Converted to {} transactions", transactions.len());
+
+    Ok(transactions)
+}
+
 async fn handle_playback_request(
     req: Request<Incoming>,
-    transactions: Arc<Vec<Transaction>>,
+    transactions: Arc<RwLock<Arc<Vec<Transaction>>>>,
     start_time: Arc<Instant>,
 ) -> Result<
     Response<http_body_util::combinators::BoxBody<bytes::Bytes, std::io::Error>>,
@@ -192,10 +268,20 @@ async fn handle_playback_request(
         "Looking for transaction: method={}, host={:?}, path={}, query={:?}",
         method, request_host, request_path, request_query
     );
-    info!("Total transactions available: {}", transactions.len());
+
+    // Read transactions with RwLock
+    let transactions_snapshot = {
+        let txn_read = transactions.read().await;
+        txn_read.clone() // Clone the Arc<Vec<Transaction>>
+    };
+
+    info!(
+        "Total transactions available: {}",
+        transactions_snapshot.len()
+    );
 
     // Debug: List all available transactions
-    for (idx, t) in transactions.iter().enumerate() {
+    for (idx, t) in transactions_snapshot.iter().enumerate() {
         if let Ok(transaction_uri) = t.url.parse::<hyper::Uri>() {
             let t_host = transaction_uri.authority().map(|a| a.as_str());
             info!(
@@ -210,7 +296,7 @@ async fn handle_playback_request(
         }
     }
 
-    let transaction = transactions
+    let transaction = transactions_snapshot
         .iter()
         .find(|t| {
             // Match method

@@ -39,13 +39,16 @@ pub async fn run_playback_mode(
     );
 
     // Convert resources to transactions
-    let transactions =
-        transaction::convert_resources_to_transactions(&inventory, &inventory_dir, file_system)
-            .await?;
+    let transactions = transaction::convert_resources_to_transactions(
+        &inventory,
+        &inventory_dir,
+        file_system.clone(),
+    )
+    .await?;
 
     println!("Created {} transactions", transactions.len());
 
-    proxy::start_playback_proxy(port, transactions, control_port).await
+    proxy::start_playback_proxy(port, transactions, control_port, inventory_dir, file_system).await
 }
 
 pub async fn load_inventory<F: FileSystem>(
