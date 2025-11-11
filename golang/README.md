@@ -123,7 +123,7 @@ import (
 
 func main() {
     // Load inventory
-    inventory, err := proxy.LoadInventory("./inventory/inventory.json")
+    inventory, err := proxy.LoadInventory("./inventory/index.json")
     if err != nil {
         panic(err)
     }

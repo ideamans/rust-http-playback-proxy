@@ -76,7 +76,7 @@ pub struct Resource {
     pub url: String,
     pub ttfb_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub download_end_ms: Option<u64>,
+    pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mbps: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,9 +90,7 @@ pub struct Resource {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type_mime: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_type_charset: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub original_charset: Option<String>,
+    pub content_charset: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_file_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,6 +99,11 @@ pub struct Resource {
     pub content_base64: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minify: Option<bool>,
+
+    // Raw body bytes (as received from upstream, possibly compressed)
+    // This field is used only during recording and is not serialized to index.json
+    #[serde(skip)]
+    pub raw_body: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ValueEnum, PartialEq)]
@@ -147,19 +150,19 @@ impl Resource {
             method,
             url,
             ttfb_ms: 0,
-            download_end_ms: None,
+            duration_ms: None,
             mbps: None,
             status_code: None,
             error_message: None,
             raw_headers: None,
             content_encoding: None,
             content_type_mime: None,
-            content_type_charset: None,
-            original_charset: None,
+            content_charset: None,
             content_file_path: None,
             content_utf8: None,
             content_base64: None,
             minify: None,
+            raw_body: None,
         }
     }
 }

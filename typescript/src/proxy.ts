@@ -182,7 +182,7 @@ export class Proxy {
    * This is useful after recording is complete
    */
   async getInventory(): Promise<Inventory> {
-    const inventoryPath = path.join(this.inventoryDir, 'inventory.json');
+    const inventoryPath = path.join(this.inventoryDir, 'index.json');
     return loadInventory(inventoryPath);
   }
 }
@@ -407,8 +407,8 @@ export function getResourceContentPath(inventoryDir: string, resource: { content
 }
 
 /**
- * Get the path to the inventory.json file
+ * Get the path to the index.json file
  */
 export function getInventoryPath(inventoryDir: string): string {
-  return path.join(inventoryDir, 'inventory.json');
+  return path.join(inventoryDir, 'index.json');
 }

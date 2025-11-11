@@ -61,9 +61,9 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
         content
     };
 
-    // Re-encode to original charset if this is a text resource with original_charset
-    if let Some(original_charset) = &resource.original_charset {
-        processed_content = re_encode_to_charset(&processed_content, original_charset)?;
+    // Re-encode to original charset if this is a text resource with content_charset
+    if let Some(charset) = &resource.content_charset {
+        processed_content = re_encode_to_charset(&processed_content, charset)?;
     }
 
     // Compress content if needed
@@ -84,24 +84,10 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
         crate::types::HeaderValue::Single(final_content.len().to_string()),
     );
 
-    // Update charset - use original_charset if available, otherwise fall back to content_type_charset
-    if let Some(mime_type) = &resource.content_type_mime {
-        let charset_to_use = resource
-            .original_charset
-            .as_ref()
-            .or(resource.content_type_charset.as_ref());
-
-        let content_type_value = if let Some(charset) = charset_to_use {
-            format!("{}; charset={}", mime_type, charset)
-        } else {
-            mime_type.clone()
-        };
-
-        headers.insert(
-            "content-type".to_string(),
-            crate::types::HeaderValue::Single(content_type_value),
-        );
-    }
+    // NOTE: We do NOT modify Content-Type header here.
+    // The original Content-Type from raw_headers is preserved exactly as recorded.
+    // The content_charset field is only used for re-encoding the body content (done above),
+    // NOT for modifying HTTP headers.
 
     Ok(Some(Transaction {
         method: resource.method.clone(),
@@ -124,12 +110,12 @@ pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChu
         return Ok((chunks, 0));
     }
 
-    // Use actual recorded transfer duration (download_end_ms - ttfb_ms)
+    // Use actual recorded transfer duration (duration_ms)
     // This ensures we reproduce the exact timing from the recording
-    let transfer_duration_ms = if let Some(download_end_ms) = resource.download_end_ms {
-        download_end_ms.saturating_sub(resource.ttfb_ms)
+    let transfer_duration_ms = if let Some(duration_ms) = resource.duration_ms {
+        duration_ms
     } else {
-        // Fallback: calculate from mbps if download_end_ms is not available
+        // Fallback: calculate from mbps if duration_ms is not available
         let mbps = resource.mbps.unwrap_or(TARGET_MBPS);
         let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0;
         (total_size as f64 / bytes_per_ms) as u64
@@ -204,13 +190,29 @@ pub fn minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<
             result
         }
         Some("text/css") => {
-            // Simple CSS minification
-            content_str
+            // Simple CSS minification - preserve @charset at the beginning
+            let mut lines: Vec<&str> = content_str
                 .lines()
                 .map(|line| line.trim())
                 .filter(|line| !line.is_empty())
-                .collect::<Vec<_>>()
-                .join("")
+                .collect();
+
+            // Extract @charset if it exists (must be first line per CSS spec)
+            let charset_line = if !lines.is_empty() && lines[0].starts_with("@charset") {
+                Some(lines.remove(0))
+            } else {
+                None
+            };
+
+            // Minify the rest (join without separators)
+            let minified_body = lines.join("");
+
+            // Prepend @charset if it existed (must be first, separated by newline)
+            if let Some(charset) = charset_line {
+                format!("{}\n{}", charset, minified_body)
+            } else {
+                minified_body
+            }
         }
         Some("application/javascript") | Some("text/javascript") => {
             // Simple JS minification - remove extra whitespace and newlines

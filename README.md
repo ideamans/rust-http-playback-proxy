@@ -56,7 +56,7 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 2. Configure browser proxy to `127.0.0.1:8080` (or displayed port)
 3. Visit website in browser
 4. Press `Ctrl+C` to stop and save recording
-5. Check `./inventory/inventory.json` and `./inventory/contents/`
+5. Check `./inventory/index.json` and `./inventory/contents/`
 
 **Manual browsing (no entry URL):**
 ```bash
@@ -192,7 +192,7 @@ p.Stop()
 **Working with inventory:**
 ```go
 // Load inventory
-inventory, err := proxy.LoadInventory("./inventory/inventory.json")
+inventory, err := proxy.LoadInventory("./inventory/index.json")
 if err != nil {
     panic(err)
 }
@@ -275,7 +275,7 @@ playback().catch(console.error);
 import { loadInventory, getResourceContentPath } from 'http-playback-proxy';
 
 // Load inventory
-const inventory = await loadInventory('./inventory/inventory.json');
+const inventory = await loadInventory('./inventory/index.json');
 
 // Iterate resources
 for (const [i, resource] of inventory.resources.entries()) {
@@ -305,7 +305,7 @@ See [typescript/README.md](typescript/README.md) for full API documentation.
 ### Data Structure
 
 Recordings are stored as:
-- `inventory.json`: Metadata for all resources (URLs, timing, headers)
+- `index.json`: Metadata for all resources (URLs, timing, headers)
 - `contents/`: Content files organized by method/protocol/path
 
 **Inventory Structure:**

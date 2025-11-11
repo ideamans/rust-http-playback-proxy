@@ -42,8 +42,8 @@ struct Resource {
     url: String,
     #[serde(rename = "ttfbMs")]
     ttfb_ms: Option<u64>,
-    #[serde(rename = "downloadEndMs")]
-    download_end_ms: Option<u64>,
+    #[serde(rename = "durationMs")]
+    duration_ms: Option<u64>,
     mbps: Option<f64>,
 }
 
@@ -368,7 +368,7 @@ fn verify_inventory(
     scenario: &TestScenario,
     tolerance: f64,
 ) -> Result<()> {
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 
@@ -386,8 +386,8 @@ fn verify_inventory(
     let expected_transfer_duration_ms = scenario.transfer_duration_ms;
 
     let recorded_ttfb_ms = resource.ttfb_ms.unwrap_or(0);
-    let recorded_download_end_ms = resource.download_end_ms.unwrap_or(0);
-    let recorded_transfer_duration_ms = recorded_download_end_ms.saturating_sub(recorded_ttfb_ms);
+    // duration_ms already represents the transfer duration
+    let recorded_transfer_duration_ms = resource.duration_ms.unwrap_or(0);
 
     info!(
         "Recording verification for scenario '{}':",
@@ -540,13 +540,13 @@ async fn main() -> Result<()> {
         info!("Inventory verification PASSED");
 
         // Read recorded values from inventory for playback verification
-        let inventory_path = inventory_dir.join("inventory.json");
+        let inventory_path = inventory_dir.join("index.json");
         let inventory_json = fs::read_to_string(&inventory_path)?;
         let inventory: Inventory = serde_json::from_str(&inventory_json)?;
         let recorded_resource = &inventory.resources[0];
         let recorded_ttfb_ms = recorded_resource.ttfb_ms.unwrap_or(0);
-        let recorded_download_end_ms = recorded_resource.download_end_ms.unwrap_or(0);
-        let recorded_total_ms = recorded_download_end_ms;
+        let recorded_duration_ms = recorded_resource.duration_ms.unwrap_or(0);
+        let recorded_total_ms = recorded_ttfb_ms + recorded_duration_ms;
 
         // === Phase 2: Playback ===
         info!("\n--- Phase 2: Playback ---");

@@ -5,8 +5,9 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info};
 
+use super::batch_processor::BatchProcessor;
 use super::hudsucker_handler::RecordingHandler;
-use crate::traits::{FileSystem, RealFileSystem};
+use crate::traits::{FileSystem, RealFileSystem, RealTimeProvider};
 use crate::types::Inventory;
 
 use hudsucker::{
@@ -45,7 +46,7 @@ pub async fn start_recording_proxy(
     let ca = RcgenAuthority::new(issuer, 1_000, aws_lc_rs::default_provider());
 
     // Create the recording handler
-    let handler = RecordingHandler::new(inventory, inventory_dir.clone());
+    let handler = RecordingHandler::new(inventory);
     let handler_inventory = handler.get_inventory();
 
     // Build the proxy with standard TLS configuration
@@ -137,7 +138,9 @@ pub async fn start_recording_proxy(
     // Setup Ctrl+C handler and shutdown listener
     let inventory_dir_clone = inventory_dir.clone();
     let handler_inventory_clone = handler_inventory.clone();
-    tokio::spawn(async move {
+    let shutdown_tx_clone = shutdown_tx.clone();
+
+    let shutdown_handler = tokio::spawn(async move {
         tokio::select! {
             _ = super::signal_handler::wait_for_shutdown_signal() => {
                 info!("Received Ctrl+C signal");
@@ -147,60 +150,71 @@ pub async fn start_recording_proxy(
             }
         }
 
-        info!("Saving inventory...");
+        // Trigger proxy shutdown by sending to all subscribers
+        let _ = shutdown_tx_clone.send(());
 
-        let inventory = handler_inventory_clone.lock().await;
+        // Wait a bit for in-flight requests to complete
+        // This ensures all resources are recorded before processing
+        info!("Waiting for in-flight requests to complete...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        info!("Processing resources...");
+
+        // Get mutable access to inventory for batch processing
+        let mut inventory = handler_inventory_clone.lock().await;
+
+        // Batch process all resources
+        let batch_processor = BatchProcessor::new(
+            inventory_dir_clone.clone(),
+            Arc::new(RealFileSystem),
+            Arc::new(RealTimeProvider::new()),
+        );
+
+        if let Err(e) = batch_processor.process_all(&mut inventory).await {
+            error!("Failed to batch process resources: {}", e);
+        } else {
+            info!("All resources processed successfully");
+        }
+
+        // Save inventory after processing
+        info!("Saving inventory...");
         if let Err(e) = save_inventory(&inventory, &inventory_dir_clone).await {
             error!("Failed to save inventory: {}", e);
         } else {
-            info!("Inventory saved successfully");
+            info!(
+                "Inventory saved successfully with {} resources",
+                inventory.resources.len()
+            );
         }
-
-        // Wait for async file writes to complete before exiting
-        // Check for content files every second, up to 10 times
-        let mut all_files_exist = false;
-
-        for attempt in 1..=10 {
-            let mut missing_count = 0;
-
-            // Check if all resources have their content files saved
-            for resource in &inventory.resources {
-                if let Some(content_path) = &resource.content_file_path {
-                    let full_path = inventory_dir_clone.join(content_path);
-                    if !tokio::fs::try_exists(&full_path).await.unwrap_or(false) {
-                        missing_count += 1;
-                    }
-                }
-            }
-
-            if missing_count == 0 {
-                info!("All content files verified (attempt {})", attempt);
-                all_files_exist = true;
-                break;
-            } else {
-                info!(
-                    "Waiting for {} content files to be written (attempt {}/10)",
-                    missing_count, attempt
-                );
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-            }
-        }
-
-        if !all_files_exist {
-            error!("Some content files may not have been written after 10 seconds");
-        }
-
-        std::process::exit(0);
     });
 
     // Start the proxy server
     info!("HTTPS MITM Proxy listening on 127.0.0.1:{}", actual_port);
     info!("Configure your client to trust the self-signed CA certificate");
 
-    if let Err(e) = proxy.start().await {
-        error!("Proxy server error: {}", e);
-        return Err(e.into());
+    // Run proxy with graceful shutdown support
+    let mut proxy_shutdown_rx = shutdown_tx.subscribe();
+
+    tokio::select! {
+        result = proxy.start() => {
+            if let Err(e) = result {
+                error!("Proxy server error: {}", e);
+                return Err(e.into());
+            }
+        }
+        _ = proxy_shutdown_rx.recv() => {
+            info!("Proxy received shutdown signal");
+            // Proxy will stop accepting new connections
+            // The shutdown handler above will save the inventory
+        }
     }
+
+    // Wait for shutdown handler to complete (inventory save, file verification, etc.)
+    info!("Waiting for shutdown handler to complete...");
+    if let Err(e) = shutdown_handler.await {
+        error!("Shutdown handler error: {}", e);
+    }
+    info!("Shutdown complete");
 
     Ok(())
 }
@@ -217,7 +231,7 @@ pub async fn save_inventory_with_fs<F: FileSystem>(
 ) -> Result<()> {
     file_system.create_dir_all(inventory_dir).await?;
 
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     // 2スペースインデントで整形
     let mut buf = Vec::new();
     let formatter = serde_json::ser::PrettyFormatter::with_indent(b"  ");

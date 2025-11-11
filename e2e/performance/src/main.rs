@@ -42,8 +42,8 @@ struct Resource {
     url: String,
     #[serde(rename = "ttfbMs")]
     ttfb_ms: Option<u64>,
-    #[serde(rename = "downloadEndMs")]
-    download_end_ms: Option<u64>,
+    #[serde(rename = "durationMs")]
+    duration_ms: Option<u64>,
     mbps: Option<f64>,
 }
 
@@ -469,7 +469,7 @@ fn verify_inventory(
     resources: &[TestResource],
     tolerance: f64,
 ) -> Result<()> {
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 
@@ -485,9 +485,8 @@ fn verify_inventory(
             let expected_transfer_duration_ms = test_resource.transfer_duration_ms;
 
             let recorded_ttfb_ms = resource.ttfb_ms.unwrap_or(0);
-            let recorded_download_end_ms = resource.download_end_ms.unwrap_or(0);
-            // Calculate transfer duration from downloadEndMs - ttfbMs (both are absolute times)
-            let recorded_transfer_duration_ms = recorded_download_end_ms.saturating_sub(recorded_ttfb_ms);
+            // duration_ms already represents the transfer duration
+            let recorded_transfer_duration_ms = resource.duration_ms.unwrap_or(0);
 
             info!(
                 "Resource {}: TTFB recorded={}ms expected={}ms, Transfer duration recorded={}ms expected={}ms",
@@ -557,7 +556,7 @@ async fn main() -> Result<()> {
     // Start mock HTTP server
     info!("Starting mock HTTP server on port {}", mock_server_port);
     let server_resources = resources.clone();
-    tokio::spawn(async move {
+    let mock_server_handle = tokio::spawn(async move {
         if let Err(e) = start_mock_server(mock_server_port, server_resources).await {
             error!("Mock server error: {:?}", e);
         }
@@ -633,6 +632,29 @@ async fn main() -> Result<()> {
     // TODO: Fix inventory verification - there seems to be an issue with request/response matching in parallel requests
     // verify_inventory(&inventory_dir, &resources, tolerance)?;
     info!("Inventory verification skipped (pending fix for parallel request matching)");
+
+    // Stop mock server before playback to ensure playback is being tested, not fallback
+    info!("\n=== Stopping mock server ===");
+    info!("Aborting mock server task...");
+    mock_server_handle.abort();
+    sleep(Duration::from_millis(500)).await;
+
+    // Verify mock server is actually stopped by attempting connection
+    info!("Verifying mock server is stopped on port {}...", mock_server_port);
+    match tokio::time::timeout(
+        Duration::from_millis(500),
+        tokio::net::TcpStream::connect(format!("127.0.0.1:{}", mock_server_port)),
+    )
+    .await
+    {
+        Ok(Ok(_)) => {
+            error!("Mock server is still running! This should not happen.");
+            anyhow::bail!("Mock server should be stopped but is still accepting connections");
+        }
+        Ok(Err(_)) | Err(_) => {
+            info!("✓ Mock server is stopped (connection refused as expected)");
+        }
+    }
 
     // === Phase 2: Playback ===
     info!("\n=== Phase 2: Playback ===");

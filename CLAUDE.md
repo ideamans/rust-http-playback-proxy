@@ -128,7 +128,7 @@ Framework-free trait-based DI for testability:
    - Save to `inventory_dir/contents/<method>/<protocol>/<path>`
 
 **Playback Flow**
-1. Load `inventory.json`
+1. Load `index.json`
 2. Convert Resources to Transactions:
    - Re-minify if `minify: true`
    - Re-encode (gzip/br/etc)
@@ -177,7 +177,7 @@ Implemented in `tests/integration_test.rs`. Full end-to-end test:
 3. Start recording proxy with temporary inventory directory
 4. Make HTTP requests through proxy using `reqwest` client
 5. Send SIGINT to recording proxy (graceful shutdown)
-6. Verify `inventory.json` and `contents/` files
+6. Verify `index.json` and `contents/` files
 7. Start playback proxy with recorded data
 8. Verify playback responses match recordings (whitespace-normalized)
 

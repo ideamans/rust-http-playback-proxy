@@ -79,7 +79,7 @@ make test-content
   - Minified HTML is beautified (line count increases 2x+)
   - Minified CSS is beautified (line count increases 2x+)
   - Minified JavaScript is beautified (line count increases 2x+)
-  - `inventory.json` has `minify: true` flag for these resources
+  - `index.json` has `minify: true` flag for these resources
 - **Why**: Makes recorded content editable for PageSpeed optimization testing
 - **Runtime**: ~10 seconds
 

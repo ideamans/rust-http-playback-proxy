@@ -20,13 +20,14 @@ export interface Resource {
   method: string;
   url: string;
   ttfbMs: number;
+  durationMs?: number;
   mbps?: number;
   statusCode?: number;
   errorMessage?: string;
   rawHeaders?: HttpHeaders;
   contentEncoding?: ContentEncodingType;
   contentTypeMime?: string;
-  contentTypeCharset?: string;
+  contentCharset?: string;
   contentFilePath?: string;
   contentUtf8?: string;
   contentBase64?: string;

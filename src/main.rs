@@ -1,5 +1,6 @@
 use clap::Parser;
 
+mod beautify;
 mod cli;
 mod playback;
 mod recording;

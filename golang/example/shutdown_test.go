@@ -55,7 +55,7 @@ func TestHTTPShutdown(t *testing.T) {
 			controlPort := 19082
 
 			// Create a minimal inventory
-			inventoryPath := filepath.Join(tmpDir, "inventory.json")
+			inventoryPath := filepath.Join(tmpDir, "index.json")
 			inventory := proxy.Inventory{
 				Resources: []proxy.Resource{},
 			}

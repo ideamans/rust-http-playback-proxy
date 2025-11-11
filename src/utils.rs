@@ -117,4 +117,107 @@ pub fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
     }
 }
 
+/// Extract charset from HTML content (looks for <meta charset> or <meta http-equiv>)
+/// This function searches the first 8KB of content to avoid processing large files
+#[allow(dead_code)]
+pub fn extract_charset_from_html(content: &[u8]) -> Option<String> {
+    // Only search first 8KB (head section should be near the start)
+    let search_len = content.len().min(8192);
+    let search_content = &content[..search_len];
+
+    // Convert to lowercase ASCII for case-insensitive search
+    let content_lower = String::from_utf8_lossy(search_content).to_lowercase();
+
+    // Pattern 1: <meta charset="xxx">
+    if let Some(pos) = content_lower.find("<meta charset=") {
+        let after_equals = &content_lower[pos + 14..];
+        let charset = if let Some(stripped) = after_equals.strip_prefix('"') {
+            // charset="xxx"
+            stripped
+                .find('"')
+                .map(|end_quote| stripped[..end_quote].to_string())
+        } else if let Some(stripped) = after_equals.strip_prefix('\'') {
+            // charset='xxx'
+            stripped
+                .find('\'')
+                .map(|end_quote| stripped[..end_quote].to_string())
+        } else {
+            // charset=xxx (no quotes)
+            let end = after_equals
+                .find(|c: char| c.is_whitespace() || c == '>' || c == '/')
+                .unwrap_or(after_equals.len());
+            Some(after_equals[..end].to_string())
+        };
+
+        if charset.is_some() {
+            return charset;
+        }
+    }
+
+    // Pattern 2: <meta http-equiv="Content-Type" content="text/html; charset=xxx">
+    if let Some(pos) = content_lower.find("http-equiv") {
+        let after_equiv = &content_lower[pos..];
+        if let Some(content_pos) = after_equiv.find("content=") {
+            let after_content = &after_equiv[content_pos + 8..];
+            // Extract the content attribute value
+            let content_value = if let Some(stripped) = after_content.strip_prefix('"') {
+                if let Some(end_quote) = stripped.find('"') {
+                    &stripped[..end_quote]
+                } else {
+                    ""
+                }
+            } else if let Some(stripped) = after_content.strip_prefix('\'') {
+                if let Some(end_quote) = stripped.find('\'') {
+                    &stripped[..end_quote]
+                } else {
+                    ""
+                }
+            } else {
+                ""
+            };
+
+            // Now extract charset from the content attribute
+            return extract_charset_from_content_type(content_value);
+        }
+    }
+
+    None
+}
+
+/// Extract charset from CSS content (looks for @charset "xxx";)
+/// This function searches the first 1KB of content as @charset must appear at the start
+#[allow(dead_code)]
+pub fn extract_charset_from_css(content: &[u8]) -> Option<String> {
+    // @charset must be the first thing in the file (ignoring whitespace/comments)
+    // Only search first 1KB
+    let search_len = content.len().min(1024);
+    let search_content = &content[..search_len];
+
+    // Convert to lowercase ASCII for case-insensitive search
+    let content_lower = String::from_utf8_lossy(search_content).to_lowercase();
+
+    // Look for @charset "xxx"; or @charset 'xxx';
+    if let Some(pos) = content_lower.find("@charset") {
+        let after_charset = &content_lower[pos + 8..].trim_start();
+
+        let charset = if let Some(stripped) = after_charset.strip_prefix('"') {
+            // @charset "xxx";
+            stripped
+                .find('"')
+                .map(|end_quote| stripped[..end_quote].to_string())
+        } else if let Some(stripped) = after_charset.strip_prefix('\'') {
+            // @charset 'xxx';
+            stripped
+                .find('\'')
+                .map(|end_quote| stripped[..end_quote].to_string())
+        } else {
+            None
+        };
+
+        return charset;
+    }
+
+    None
+}
+
 mod tests;

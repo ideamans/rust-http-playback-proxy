@@ -65,8 +65,8 @@ struct Resource {
     #[serde(rename = "statusCode")]
     status_code: Option<u16>,
     minify: Option<bool>,
-    #[serde(rename = "originalCharset", skip_serializing_if = "Option::is_none")]
-    original_charset: Option<String>,
+    #[serde(rename = "contentCharset", skip_serializing_if = "Option::is_none")]
+    content_charset: Option<String>,
     #[serde(rename = "contentEncoding", skip_serializing_if = "Option::is_none")]
     content_encoding: Option<String>,
     #[serde(rename = "contentFilePath", skip_serializing_if = "Option::is_none")]
@@ -304,6 +304,51 @@ async fn handle_request(
         return Ok(response);
     }
 
+    // === Charset from content tests (no HTTP header charset) ===
+    // HTML with Shift_JIS (no charset in HTTP header)
+    if path == "/charset-from-content/html-shiftjis.html" {
+        let body = encode_to_charset(HTML_SHIFT_JIS_META, SHIFT_JIS);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
+    // HTML with EUC-JP (no charset in HTTP header)
+    if path == "/charset-from-content/html-eucjp.html" {
+        let body = encode_to_charset(HTML_EUC_JP_META, EUC_JP);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
+    // CSS with Shift_JIS (no charset in HTTP header)
+    if path == "/charset-from-content/style-shiftjis.css" {
+        let body = encode_to_charset(CSS_SHIFT_JIS, SHIFT_JIS);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/css")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
+    // CSS with UTF-8 (no charset in HTTP header)
+    if path == "/charset-from-content/style-utf8.css" {
+        let body = encode_to_charset(CSS_UTF8, UTF_8);
+        let response = Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/css")  // No charset in header
+            .body(Full::new(Bytes::from(body)).boxed())
+            .unwrap();
+        return Ok(response);
+    }
+
     // 404 for unknown paths
     let response = Response::builder()
         .status(StatusCode::NOT_FOUND)
@@ -339,6 +384,7 @@ async fn start_mock_server(port: u16) -> Result<()> {
 fn start_recording_proxy(
     entry_url: &str,
     proxy_port: u16,
+    control_port: u16,
     inventory_dir: &PathBuf,
 ) -> Result<Child> {
     // Use CARGO_MANIFEST_DIR to get workspace root
@@ -347,11 +393,17 @@ fn start_recording_proxy(
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
-    // Check if we're in CI environment (binary should be pre-built)
-    let use_prebuilt = std::env::var("CI").is_ok();
+    // Check if binary exists - prefer using binary over cargo run
+    // This is important because cargo run doesn't properly forward SIGINT to child process
+    let binary_path = repo_root.join("target/release/http-playback-proxy");
+    #[cfg(windows)]
+    let binary_path = binary_path.with_extension("exe");
+
+    // Use pre-built binary if in CI or if binary exists
+    let use_prebuilt = std::env::var("CI").is_ok() || binary_path.exists();
 
     let child = if use_prebuilt {
-        // CI: Use pre-built binary directly
+        // CI or Local with binary: Use pre-built binary directly
         let binary_path = repo_root.join("target/release/http-playback-proxy");
         #[cfg(windows)]
         let binary_path = binary_path.with_extension("exe");
@@ -366,6 +418,8 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
+                .arg("--control-port")
+                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -378,6 +432,8 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
+            .arg("--control-port")
+            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -403,6 +459,8 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
+                .arg("--control-port")
+                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -422,6 +480,8 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
+            .arg("--control-port")
+            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -591,7 +651,7 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
 fn verify_inventory_minify_flags(inventory_dir: &PathBuf) -> Result<()> {
     info!("\n--- Verifying Inventory Minify Flags ---");
 
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 
@@ -653,7 +713,7 @@ fn verify_inventory_minify_flags(inventory_dir: &PathBuf) -> Result<()> {
 fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
     info!("\n--- Verifying Charset Handling in Inventory ---");
 
-    let inventory_path = inventory_dir.join("inventory.json");
+    let inventory_path = inventory_dir.join("index.json");
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 
@@ -665,29 +725,29 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
         // Check charset test resources
         if url.contains("/charset/") {
             info!("\nCharset resource: {}", url);
-            info!("  originalCharset: {:?}", resource.original_charset);
+            info!("  contentCharset: {:?}", resource.content_charset);
 
             if url.contains("-shiftjis.") {
-                if resource.original_charset != Some("Shift_JIS".to_string()) {
+                if resource.content_charset != Some("Shift_JIS".to_string()) {
                     anyhow::bail!(
-                        "Shift_JIS resource should have originalCharset=Shift_JIS, got: {:?}",
-                        resource.original_charset
+                        "Shift_JIS resource should have contentCharset=Shift_JIS, got: {:?}",
+                        resource.content_charset
                     );
                 }
                 info!("  ✓ Shift_JIS charset preserved");
             } else if url.contains("-eucjp.") {
-                if resource.original_charset != Some("EUC-JP".to_string()) {
+                if resource.content_charset != Some("EUC-JP".to_string()) {
                     anyhow::bail!(
-                        "EUC-JP resource should have originalCharset=EUC-JP, got: {:?}",
-                        resource.original_charset
+                        "EUC-JP resource should have contentCharset=EUC-JP, got: {:?}",
+                        resource.content_charset
                     );
                 }
                 info!("  ✓ EUC-JP charset preserved");
             } else if url.contains("-utf8.") {
-                if resource.original_charset != Some("UTF-8".to_string()) {
+                if resource.content_charset != Some("UTF-8".to_string()) {
                     anyhow::bail!(
-                        "UTF-8 resource should have originalCharset=UTF-8, got: {:?}",
-                        resource.original_charset
+                        "UTF-8 resource should have contentCharset=UTF-8, got: {:?}",
+                        resource.content_charset
                     );
                 }
                 info!("  ✓ UTF-8 charset preserved");
@@ -735,6 +795,48 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
                 info!("  ✓ Deflate encoding preserved");
             }
         }
+
+        // Check charset-from-content test resources (charset detected from HTML/CSS content)
+        if url.contains("/charset-from-content/") {
+            info!("\nCharset-from-content resource: {}", url);
+            info!("  contentCharset: {:?}", resource.content_charset);
+
+            if url.contains("-shiftjis.") {
+                if resource.content_charset != Some("shift_jis".to_string()) {
+                    anyhow::bail!(
+                        "Shift_JIS resource (detected from content) should have contentCharset=shift_jis, got: {:?}",
+                        resource.content_charset
+                    );
+                }
+                info!("  ✓ Shift_JIS charset detected from content");
+            } else if url.contains("-eucjp.") {
+                if resource.content_charset != Some("euc-jp".to_string()) {
+                    anyhow::bail!(
+                        "EUC-JP resource (detected from content) should have contentCharset=euc-jp, got: {:?}",
+                        resource.content_charset
+                    );
+                }
+                info!("  ✓ EUC-JP charset detected from content");
+            } else if url.contains("-utf8.") {
+                if resource.content_charset != Some("utf-8".to_string()) {
+                    anyhow::bail!(
+                        "UTF-8 resource (detected from content) should have contentCharset=utf-8, got: {:?}",
+                        resource.content_charset
+                    );
+                }
+                info!("  ✓ UTF-8 charset detected from content");
+            }
+
+            // Verify content file is UTF-8
+            if let Some(content_file_path) = &resource.content_file_path {
+                let full_path = inventory_dir.join(content_file_path);
+                if full_path.exists() {
+                    let content = fs::read_to_string(&full_path)?;
+                    // If we can read it as UTF-8 string, it's stored as UTF-8
+                    info!("  ✓ Content file stored as UTF-8: {} bytes", content.len());
+                }
+            }
+        }
     }
 
     info!("\nAll charset and encoding metadata verified!");
@@ -748,11 +850,27 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
         .and_then(Path::parent)
         .context("failed to resolve workspace root")?;
 
-    // Check if we're in CI environment (binary should be pre-built)
-    let use_prebuilt = std::env::var("CI").is_ok();
+    // Convert inventory_dir to absolute path to ensure child process can access it
+    let absolute_inventory_dir = if inventory_dir.is_absolute() {
+        inventory_dir.clone()
+    } else {
+        std::env::current_dir()?.join(inventory_dir)
+    };
+
+    info!("start_playback_proxy: inventory_dir = {:?}", inventory_dir);
+    info!("start_playback_proxy: absolute_inventory_dir = {:?}", absolute_inventory_dir);
+
+    // Check if binary exists - prefer using binary over cargo run
+    // This is important because cargo run doesn't properly forward SIGINT to child process
+    let binary_path = repo_root.join("target/release/http-playback-proxy");
+    #[cfg(windows)]
+    let binary_path = binary_path.with_extension("exe");
+
+    // Use pre-built binary if in CI or if binary exists
+    let use_prebuilt = std::env::var("CI").is_ok() || binary_path.exists();
 
     let child = if use_prebuilt {
-        // CI: Use pre-built binary directly
+        // CI or Local with binary: Use pre-built binary directly
         let binary_path = repo_root.join("target/release/http-playback-proxy");
         #[cfg(windows)]
         let binary_path = binary_path.with_extension("exe");
@@ -762,7 +880,9 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
             .arg("--port")
             .arg(proxy_port.to_string())
             .arg("--inventory")
-            .arg(inventory_dir.to_str().unwrap())
+            .arg(absolute_inventory_dir.to_str().unwrap())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .spawn()?
     } else {
         // Local: Use cargo run
@@ -781,7 +901,9 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
             .arg("--port")
             .arg(proxy_port.to_string())
             .arg("--inventory")
-            .arg(inventory_dir.to_str().unwrap())
+            .arg(absolute_inventory_dir.to_str().unwrap())
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
             .spawn()?
     };
 
@@ -796,12 +918,45 @@ async fn verify_playback_proxy(
     mock_server_port: u16,
 ) -> Result<()> {
     info!("\n--- Verifying Playback Charset/Encoding Reproduction ---");
+    info!("Inventory directory: {:?}", inventory_dir);
+    info!("Playback proxy port: {}", playback_proxy_port);
+
+    // Double-check inventory directory exists before starting playback proxy
+    info!("Pre-check: inventory_dir exists? {}", inventory_dir.exists());
+    if inventory_dir.exists() {
+        info!("Pre-check: inventory_dir is a directory? {}", inventory_dir.is_dir());
+        info!("Pre-check: inventory_dir path: {:?}", inventory_dir);
+
+        // List files
+        if let Ok(entries) = std::fs::read_dir(inventory_dir) {
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    info!("  Pre-check file: {:?}", entry.path());
+                }
+            }
+        }
+    }
 
     // Start playback proxy
     let mut playback_proxy = start_playback_proxy(playback_proxy_port, inventory_dir)?;
+    info!("Playback proxy started with PID: {}", playback_proxy.id());
+
+    // Give child process time to actually start before waiting for port
+    sleep(Duration::from_millis(500)).await;
+    info!("After 500ms sleep, checking if playback proxy process is still alive...");
+    match playback_proxy.try_wait()? {
+        Some(status) => {
+            anyhow::bail!("Playback proxy exited immediately with status: {:?}", status);
+        }
+        None => {
+            info!("✓ Playback proxy process is still running");
+        }
+    }
 
     // Wait for playback proxy to start
+    info!("Waiting for playback proxy to be ready...");
     wait_for_proxy(playback_proxy_port, 30).await?;
+    info!("✓ Playback proxy is ready");
 
     let client = reqwest::Client::builder()
         .proxy(reqwest::Proxy::http(format!(
@@ -862,6 +1017,74 @@ async fn verify_playback_proxy(
     }
     info!("  ✓ Gzip encoding reproduced in playback");
 
+    // Test charset-from-content resources (charset detected from HTML/CSS, not HTTP header)
+    info!("\nTesting charset-from-content HTML playback (Shift_JIS detected from <meta charset>)");
+    let response = client
+        .get(format!("http://{}:{}/charset-from-content/html-shiftjis.html", mock_server_host, mock_server_port))
+        .send()
+        .await?;
+
+    // HTTP header should NOT have charset (since original didn't have it)
+    let content_type = response.headers().get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if content_type.contains("charset") {
+        anyhow::bail!(
+            "Playback should NOT add charset to HTTP header when it wasn't in original, got: {}",
+            content_type
+        );
+    }
+    info!("  ✓ HTTP header has no charset (preserved from recording)");
+
+    let body_bytes = response.bytes().await?;
+    // Body should be Shift_JIS encoded (re-encoded from UTF-8 storage)
+    let (decoded, _, had_errors) = SHIFT_JIS.decode(&body_bytes);
+    if had_errors {
+        anyhow::bail!("Playback body is not valid Shift_JIS");
+    }
+    info!("  ✓ Playback body is valid Shift_JIS: {} bytes", body_bytes.len());
+
+    // Verify <meta charset> is preserved in the HTML
+    if !decoded.contains(r#"charset="Shift_JIS"#) && !decoded.contains(r#"charset="shift_jis"#) {
+        anyhow::bail!("Meta tag should still contain Shift_JIS charset declaration");
+    }
+    info!("  ✓ <meta charset> declaration preserved in playback");
+
+    // Test CSS charset-from-content
+    info!("\nTesting charset-from-content CSS playback (Shift_JIS detected from @charset)");
+    let response = client
+        .get(format!("http://{}:{}/charset-from-content/style-shiftjis.css", mock_server_host, mock_server_port))
+        .send()
+        .await?;
+
+    // HTTP header should NOT have charset (since original didn't have it)
+    let content_type = response.headers().get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if content_type.contains("charset") {
+        anyhow::bail!(
+            "Playback should NOT add charset to HTTP header when it wasn't in original, got: {}",
+            content_type
+        );
+    }
+    info!("  ✓ HTTP header has no charset (preserved from recording)");
+
+    let body_bytes = response.bytes().await?;
+    // Body should be Shift_JIS encoded (re-encoded from UTF-8 storage)
+    let (decoded, _, had_errors) = SHIFT_JIS.decode(&body_bytes);
+    if had_errors {
+        anyhow::bail!("Playback CSS body is not valid Shift_JIS");
+    }
+    info!("  ✓ Playback CSS body is valid Shift_JIS: {} bytes", body_bytes.len());
+
+    // Verify @charset declaration is preserved
+    if !decoded.contains(r#"@charset "Shift_JIS"#) && !decoded.contains(r#"@charset "shift_jis"#) {
+        anyhow::bail!("CSS should still contain Shift_JIS @charset declaration");
+    }
+    info!("  ✓ @charset declaration preserved in playback");
+
     // Stop playback proxy
     let _ = playback_proxy.kill();
     let _ = playback_proxy.wait();
@@ -879,12 +1102,13 @@ async fn main() -> Result<()> {
 
     // Use 127.0.0.1 consistently to avoid IPv6/IPv4 mismatch on CI runners
     const MOCK_SERVER_HOST: &str = "127.0.0.1";
+    const RECORDING_CONTROL_PORT: u16 = 18083;
     let mock_server_port = 18080;
     let recording_proxy_port = 18081;
 
     // Start mock HTTP server
     info!("\nStarting mock HTTP server on {}:{}", MOCK_SERVER_HOST, mock_server_port);
-    tokio::spawn(async move {
+    let mock_server_handle = tokio::spawn(async move {
         if let Err(e) = start_mock_server(mock_server_port).await {
             error!("Mock server error: {:?}", e);
         }
@@ -895,8 +1119,10 @@ async fn main() -> Result<()> {
     wait_for_proxy(mock_server_port, 30).await?;
 
     // Create temporary inventory directory
-    let temp_dir = tempfile::tempdir()?;
-    let inventory_dir = temp_dir.path().to_path_buf();
+    // IMPORTANT: Keep _temp_dir alive until the end of the function
+    // to prevent automatic cleanup of the temporary directory
+    let _temp_dir = tempfile::tempdir()?;
+    let inventory_dir = _temp_dir.path().to_path_buf();
     info!("Using inventory directory: {:?}", inventory_dir);
 
     // === Phase 1: Recording ===
@@ -904,7 +1130,7 @@ async fn main() -> Result<()> {
 
     let entry_url = format!("http://{}:{}/", MOCK_SERVER_HOST, mock_server_port);
     let mut recording_proxy =
-        start_recording_proxy(&entry_url, recording_proxy_port, &inventory_dir)?;
+        start_recording_proxy(&entry_url, recording_proxy_port, RECORDING_CONTROL_PORT, &inventory_dir)?;
 
     // Wait for proxy to start (with retry logic for CI environments where build takes time)
     wait_for_proxy(recording_proxy_port, 60).await?;
@@ -942,42 +1168,75 @@ async fn main() -> Result<()> {
     make_request(recording_proxy_port, &format!("http://{}:{}/combo/shiftjis-gzip.html", MOCK_SERVER_HOST, mock_server_port)).await?;
     make_request(recording_proxy_port, &format!("http://{}:{}/combo/eucjp-br.html", MOCK_SERVER_HOST, mock_server_port)).await?;
 
+    // Make requests for charset-from-content tests (no HTTP header charset)
+    info!("\nMaking requests for charset-from-content tests (detecting charset from HTML/CSS content)");
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/html-shiftjis.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/html-eucjp.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/style-shiftjis.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/style-utf8.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+
     info!("\nAll requests completed");
 
-    // Send SIGINT to recording proxy for graceful shutdown
-    info!("\nStopping recording proxy");
-    #[cfg(unix)]
-    {
-        unsafe {
-            libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+    // Send shutdown request via control port for graceful shutdown
+    info!("\nStopping recording proxy via control port");
+    let shutdown_url = format!("http://127.0.0.1:{}/_shutdown", RECORDING_CONTROL_PORT);
+    match reqwest::Client::new().post(&shutdown_url).send().await {
+        Ok(_) => {
+            info!("Shutdown request sent successfully");
         }
-        // Wait for graceful shutdown
-        sleep(Duration::from_secs(3)).await;
-        let _ = recording_proxy.wait();
-    }
-    #[cfg(windows)]
-    {
-        // Windows: Send Ctrl+Break event for graceful shutdown
-        const CTRL_BREAK_EVENT: u32 = 1;
-
-        unsafe {
-            #[link(name = "kernel32")]
-            extern "system" {
-                fn GenerateConsoleCtrlEvent(dwCtrlEvent: u32, dwProcessGroupId: u32) -> i32;
+        Err(e) => {
+            info!("Failed to send shutdown request: {:?}, falling back to SIGINT", e);
+            #[cfg(unix)]
+            unsafe {
+                libc::kill(recording_proxy.id() as i32, libc::SIGINT);
             }
-
-            let result = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, recording_proxy.id());
-            if result != 0 {
-                info!("Sent Ctrl+Break event, waiting for graceful shutdown");
-                sleep(Duration::from_secs(3)).await;
-                let _ = recording_proxy.wait();
-            } else {
-                info!("Failed to send Ctrl+Break, force killing");
+            #[cfg(windows)]
+            {
                 let _ = recording_proxy.kill();
-                let _ = recording_proxy.wait();
             }
         }
     }
+
+    // Wait for index.json to be created (with timeout)
+    info!("Waiting for index.json to be created...");
+    let index_path = inventory_dir.join("index.json");
+    let max_wait = Duration::from_secs(30);
+    let start = std::time::Instant::now();
+
+    loop {
+        if index_path.exists() {
+            info!("✓ index.json created successfully");
+            break;
+        }
+
+        if start.elapsed() > max_wait {
+            anyhow::bail!(
+                "Timeout waiting for index.json to be created. Recording proxy may have failed to shutdown gracefully."
+            );
+        }
+
+        // Check if process is still alive
+        match recording_proxy.try_wait()? {
+            Some(status) => {
+                if !index_path.exists() {
+                    anyhow::bail!(
+                        "Recording proxy exited with status {:?} but index.json was not created",
+                        status
+                    );
+                }
+                info!("✓ Recording proxy exited with status: {:?}", status);
+                break;
+            }
+            None => {
+                // Process still running, wait a bit
+                sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+
+    // Wait a bit more to ensure all content files are written
+    info!("Waiting for content files to be written...");
+    sleep(Duration::from_secs(2)).await;
 
     // === Phase 2: Verification ===
     info!("\n--- Phase 2: Verification ---");
@@ -992,7 +1251,55 @@ async fn main() -> Result<()> {
     verify_charset_in_inventory(&inventory_dir)?;
 
     // === Phase 3: Playback Verification ===
-    info!("\n--- Phase 3: Playback ---");
+    // IMPORTANT: We stop the mock server BEFORE starting playback proxy
+    // to ensure we're testing actual playback, not fallback to original server
+    info!("\n--- Phase 3: Playback (with original server stopped) ---");
+
+    // Debug: Check inventory directory before stopping mock server
+    info!("Checking inventory directory: {:?}", inventory_dir);
+
+    // List all files in inventory directory
+    match std::fs::read_dir(&inventory_dir) {
+        Ok(entries) => {
+            info!("Files in inventory directory:");
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    info!("  - {:?}", entry.path());
+                }
+            }
+        }
+        Err(e) => {
+            anyhow::bail!("Failed to read inventory directory: {:?}", e);
+        }
+    }
+
+    let index_path = inventory_dir.join("index.json");
+    if !index_path.exists() {
+        anyhow::bail!("index.json not found at {:?}", index_path);
+    }
+    info!("✓ index.json exists");
+
+    let contents_dir = inventory_dir.join("contents");
+    if !contents_dir.exists() {
+        anyhow::bail!("contents directory not found at {:?}", contents_dir);
+    }
+    info!("✓ contents directory exists");
+
+    info!("Stopping mock server to ensure playback proxy is actually working...");
+    mock_server_handle.abort();
+
+    // Wait a bit to ensure port is released
+    sleep(Duration::from_secs(1)).await;
+
+    // Verify mock server is actually stopped by trying to connect
+    match tokio::net::TcpStream::connect(format!("{}:{}", MOCK_SERVER_HOST, mock_server_port)).await {
+        Ok(_) => {
+            anyhow::bail!("Mock server is still running on port {}! Cannot verify playback.", mock_server_port);
+        }
+        Err(_) => {
+            info!("✓ Mock server stopped successfully");
+        }
+    }
 
     let playback_proxy_port = 18082;
     verify_playback_proxy(&inventory_dir, playback_proxy_port, MOCK_SERVER_HOST, mock_server_port).await?;
@@ -1006,5 +1313,6 @@ async fn main() -> Result<()> {
     info!("✓ Combination tests");
     info!("✓ Playback verification");
 
+    // _temp_dir will be automatically dropped here, cleaning up the temporary directory
     Ok(())
 }

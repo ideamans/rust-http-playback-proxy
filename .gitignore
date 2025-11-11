@@ -1,6 +1,9 @@
 # Rust build artifacts
 /target
 
+# Temporary test inventory directories
+/tmp/
+
 # TypeScript build artifacts and dependencies
 /typescript/dist/
 /typescript/node_modules/

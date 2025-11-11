@@ -91,7 +91,7 @@ import { loadInventory, getResourceContentPath } from 'http-playback-proxy';
 
 async function analyzeInventory() {
   // Load inventory
-  const inventory = await loadInventory('./inventory/inventory.json');
+  const inventory = await loadInventory('./inventory/index.json');
 
   // Iterate through resources
   for (const [i, resource] of inventory.resources.entries()) {
@@ -155,7 +155,7 @@ interface Resource {
   rawHeaders?: Record<string, string>;
   contentEncoding?: ContentEncodingType;
   contentTypeMime?: string;
-  contentTypeCharset?: string;
+  contentCharset?: string;
   contentFilePath?: string;
   contentUtf8?: string;
   contentBase64?: string;
@@ -193,7 +193,7 @@ Saves an inventory to a JSON file.
 Returns the full path to a resource's content file.
 
 #### `getInventoryPath(inventoryDir: string): string`
-Returns the path to the inventory.json file.
+Returns the path to the index.json file.
 
 #### `ensureBinary(): Promise<void>`
 Ensures the binary is available, downloading if necessary.
