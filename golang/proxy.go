@@ -419,9 +419,8 @@ func (p *Proxy) IsRunning() bool {
 		return false
 	}
 
-	// Check if process is still alive
-	err := p.cmd.Process.Signal(syscall.Signal(0))
-	return err == nil
+	// Use platform-specific process check (defined in proxy_unix.go and proxy_windows.go)
+	return isProcessRunning(p.cmd.Process)
 }
 
 // Wait waits for the proxy to exit
