@@ -87,11 +87,39 @@ export class Proxy {
       });
 
       // Send platform-appropriate signal:
-      // Unix: SIGTERM (preferred for programmatic shutdown)
-      // Windows: SIGINT (maps to CTRL_C_EVENT, as Node.js doesn't support CTRL_BREAK)
-      const signal = process.platform === 'win32' ? 'SIGINT' : 'SIGTERM';
+      // Unix: SIGTERM (standard kill signal)
+      // Windows: Use signal subcommand to send CTRL_BREAK via Windows API
       try {
-        this.process.kill(signal);
+        if (process.platform === 'win32') {
+          // On Windows, use the signal subcommand to send CTRL_BREAK
+          // This ensures proper console event delivery to the process group
+          const binaryPath = getFullBinaryPath();
+          const { spawnSync } = require('child_process');
+          const result = spawnSync(
+            binaryPath,
+            ['signal', '--pid', this.process.pid!.toString(), '--kind', 'ctrl-break'],
+            { stdio: 'pipe' }
+          );
+
+          if (result.error) {
+            clearTimeout(timeout);
+            reject(new Error(`Failed to send signal: ${result.error.message}`));
+            return;
+          }
+
+          if (result.status !== 0) {
+            clearTimeout(timeout);
+            reject(
+              new Error(
+                `Signal command failed with exit code ${result.status}: ${result.stderr?.toString() || ''}`
+              )
+            );
+            return;
+          }
+        } else {
+          // On Unix, use standard SIGTERM
+          this.process.kill('SIGTERM');
+        }
       } catch (err) {
         clearTimeout(timeout);
         reject(err);

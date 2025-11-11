@@ -64,6 +64,35 @@ http-playback-proxy playback --port 8080
 kill $PID       # SIGTERM (programmatic)
 ```
 
+## Signal Subcommand (Internal Helper)
+
+The `signal` subcommand is an internal helper for sending signals across platforms, primarily designed to solve Windows limitations in language wrappers.
+
+**Usage:**
+```bash
+# Send CTRL_BREAK (Windows) / SIGTERM (Unix)
+http-playback-proxy signal --pid <PID> --kind ctrl-break
+
+# Send CTRL_C (Windows) / SIGINT (Unix)
+http-playback-proxy signal --pid <PID> --kind ctrl-c
+
+# Send SIGTERM (Unix) / CTRL_BREAK (Windows)
+http-playback-proxy signal --pid <PID> --kind term
+
+# Send SIGINT (Unix) / CTRL_C (Windows)
+http-playback-proxy signal --pid <PID> --kind int
+```
+
+**Why This Exists:**
+
+On Windows, Node.js's `process.kill('SIGTERM')` actually performs a force kill (taskkill), not a graceful shutdown. The `signal` subcommand uses Windows native APIs (`AttachConsole`, `GenerateConsoleCtrlEvent`) to properly send console control events to the target process group.
+
+On Unix, this subcommand simply calls `kill(2)` with the appropriate signal, providing a unified interface across platforms.
+
+**Internal Use Only:**
+
+This subcommand is hidden from the main help (`--help`) and is intended for use by language wrappers (TypeScript, Go) only. It is documented here for maintainers and wrapper developers.
+
 ## Implementation Details
 
 ### Rust Signal Handler
@@ -254,11 +283,26 @@ export class Proxy {
       });
 
       // Send platform-appropriate signal:
-      // Unix: SIGTERM (preferred for programmatic shutdown)
-      // Windows: SIGINT (maps to CTRL_C_EVENT, as Node.js doesn't support CTRL_BREAK)
-      const signal = process.platform === 'win32' ? 'SIGINT' : 'SIGTERM';
+      // Unix: SIGTERM (standard kill signal)
+      // Windows: Use signal subcommand to send CTRL_BREAK via Windows API
       try {
-        this.process.kill(signal);
+        if (process.platform === 'win32') {
+          // On Windows, use the signal subcommand to send CTRL_BREAK
+          const binaryPath = getFullBinaryPath();
+          const { spawnSync } = require('child_process');
+          const result = spawnSync(
+            binaryPath,
+            ['signal', '--pid', this.process.pid.toString(), '--kind', 'ctrl-break'],
+            { stdio: 'pipe' }
+          );
+          if (result.status !== 0) {
+            reject(new Error(`Signal command failed: ${result.stderr?.toString() || ''}`));
+            return;
+          }
+        } else {
+          // On Unix, use standard SIGTERM
+          this.process.kill('SIGTERM');
+        }
       } catch (err) {
         reject(err);
       }

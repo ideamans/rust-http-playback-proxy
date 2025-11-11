@@ -53,4 +53,17 @@ pub enum Commands {
         )]
         inventory: PathBuf,
     },
+
+    /// Send signal to a process (internal helper, primarily for Windows)
+    #[command(hide = true)]
+    Signal {
+        #[arg(long, help = "Process ID to send signal to")]
+        pid: u32,
+
+        #[arg(
+            long,
+            help = "Signal kind: ctrl-break (Windows CTRL_BREAK), ctrl-c (Windows CTRL_C), term (Unix SIGTERM), int (Unix SIGINT)"
+        )]
+        kind: String,
+    },
 }
