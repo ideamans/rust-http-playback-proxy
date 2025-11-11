@@ -87,11 +87,17 @@ http-playback-proxy signal --pid <PID> --kind int
 
 On Unix, this subcommand provides a simple way to send signals using `kill(2)`.
 
-On Windows, this was originally intended to send console control events using native APIs (`AttachConsole`, `GenerateConsoleCtrlEvent`), but this approach has limitations: `AttachConsole` can only attach to processes in the same console session, which fails when called from Node.js child processes or different console sessions.
+On Windows, Node.js's `process.kill('SIGTERM')` performs a force kill (taskkill), not graceful shutdown. The signal subcommand uses Windows native APIs to properly send console control events:
 
-**Current Limitation:**
+1. `FreeConsole()` - Detach from current console (required to avoid ERROR_ACCESS_DENIED)
+2. `AttachConsole(pid)` - Attach to target process's console
+3. `SetConsoleCtrlHandler(NULL, TRUE)` - Ignore CTRL events for signal sender itself
+4. `GenerateConsoleCtrlEvent(event, 0)` - Send CTRL_BREAK or CTRL_C to process group
+5. `Sleep(100)` - Wait for event delivery
+6. `FreeConsole()` - Detach from target console
+7. `SetConsoleCtrlHandler(NULL, FALSE)` - Re-enable CTRL event handling
 
-Due to Windows console session restrictions, the signal subcommand cannot reliably send signals to child processes on Windows. Language wrappers should use `process.kill('SIGINT')` on Windows instead, which Node.js converts to CTRL_C_EVENT.
+This sequence properly delivers console control events even when called from Node.js child processes or CI environments.
 
 **Internal Use Only:**
 
@@ -288,18 +294,38 @@ export class Proxy {
 
       // Send platform-appropriate signal:
       // Unix: SIGTERM (standard kill signal)
-      // Windows: SIGINT (CTRL_C_EVENT) - Node.js limitation, cannot send CTRL_BREAK
+      // Windows: Use signal subcommand to send CTRL_BREAK via Windows API
       try {
         if (process.platform === 'win32') {
-          // On Windows, use SIGINT which Node.js converts to CTRL_C_EVENT
-          // Node.js cannot send CTRL_BREAK_EVENT, and the signal subcommand
-          // cannot attach to processes in different console sessions
-          this.process.kill('SIGINT');
+          // On Windows, use the signal subcommand to send CTRL_BREAK
+          // The subcommand uses FreeConsole + AttachConsole + GenerateConsoleCtrlEvent
+          // to properly deliver console control events to the target process
+          const binaryPath = getFullBinaryPath();
+          const { spawnSync } = require('child_process');
+          const result = spawnSync(
+            binaryPath,
+            ['signal', '--pid', this.process.pid.toString(), '--kind', 'ctrl-break'],
+            { stdio: 'pipe' }
+          );
+
+          if (result.error) {
+            clearTimeout(timeout);
+            reject(new Error(`Failed to send signal: ${result.error.message}`));
+            return;
+          }
+
+          if (result.status !== 0) {
+            clearTimeout(timeout);
+            const stderr = result.stderr?.toString() || '';
+            reject(new Error(`Signal command failed with exit code ${result.status}: ${stderr}`));
+            return;
+          }
         } else {
           // On Unix, use standard SIGTERM
           this.process.kill('SIGTERM');
         }
       } catch (err) {
+        clearTimeout(timeout);
         reject(err);
       }
     });

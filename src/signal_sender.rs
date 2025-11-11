@@ -49,6 +49,7 @@ pub fn send_signal(pid: u32, kind: SignalKind) -> Result<()> {
 fn send_signal_windows(pid: u32, kind: SignalKind) -> Result<()> {
     use windows_sys::Win32::System::Console::{
         AttachConsole, CTRL_BREAK_EVENT, CTRL_C_EVENT, FreeConsole, GenerateConsoleCtrlEvent,
+        SetConsoleCtrlHandler,
     };
 
     // Map signal kind to Windows console control event
@@ -58,20 +59,38 @@ fn send_signal_windows(pid: u32, kind: SignalKind) -> Result<()> {
     };
 
     unsafe {
-        // Attach to the target process's console
+        // Step 1: Detach from current console (if any)
+        // This is required because AttachConsole fails with ERROR_ACCESS_DENIED
+        // if the calling process is already attached to a console
+        FreeConsole();
+
+        // Step 2: Attach to the target process's console
         if AttachConsole(pid) == 0 {
+            let err = std::io::Error::last_os_error();
             anyhow::bail!(
-                "Failed to attach to console of process {}: {}",
+                "Failed to attach to console of process {}: {}\n\
+                 Hint: Make sure the target process has a console window.\n\
+                 If running in CI or background, consider using CREATE_NEW_CONSOLE flag when spawning.",
                 pid,
-                std::io::Error::last_os_error()
+                err
             );
         }
 
-        // Send the console control event
+        // Step 3: Ignore CTRL events for this process
+        // Without this, the signal sender itself would also receive the CTRL event
+        SetConsoleCtrlHandler(None, 1); // TRUE = ignore
+
+        // Step 4: Send the console control event to the process group
         let result = GenerateConsoleCtrlEvent(event, 0);
 
-        // Always detach from the console, even if GenerateConsoleCtrlEvent failed
+        // Step 5: Wait briefly for the event to be delivered
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
+        // Step 6: Detach from the target console
         FreeConsole();
+
+        // Step 7: Re-enable CTRL event handling for this process
+        SetConsoleCtrlHandler(None, 0); // FALSE = handle normally
 
         if result == 0 {
             anyhow::bail!(
