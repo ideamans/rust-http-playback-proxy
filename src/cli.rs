@@ -34,13 +34,6 @@ pub enum Commands {
             help = "Inventory directory"
         )]
         inventory: PathBuf,
-
-        #[arg(
-            short,
-            long,
-            help = "Port for control/management API (enables HTTP shutdown endpoint)"
-        )]
-        control_port: Option<u16>,
     },
 
     #[command(about = "Playback recorded HTTP traffic")]
@@ -59,12 +52,18 @@ pub enum Commands {
             help = "Inventory directory"
         )]
         inventory: PathBuf,
+    },
+
+    /// Send signal to a process (internal helper, primarily for Windows)
+    #[command(hide = true)]
+    Signal {
+        #[arg(long, help = "Process ID to send signal to")]
+        pid: u32,
 
         #[arg(
-            short,
             long,
-            help = "Port for control/management API (enables HTTP shutdown endpoint)"
+            help = "Signal kind: ctrl-break (Windows CTRL_BREAK), ctrl-c (Windows CTRL_C), term (Unix SIGTERM), int (Unix SIGINT)"
         )]
-        control_port: Option<u16>,
+        kind: String,
     },
 }

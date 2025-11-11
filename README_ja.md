@@ -38,7 +38,7 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 
 #### 録画モード
 
-**基本的な録画 (ポート8080から自動検索):**
+**基本的な録画 (ポート18080から自動検索):**
 ```bash
 ./http-playback-proxy recording https://example.com
 ```
@@ -46,22 +46,22 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 **全オプション:**
 ```bash
 ./http-playback-proxy recording https://example.com \
-  --port 8080 \              # プロキシポート (デフォルト: 8080、使用中なら自動検索)
+  --port 18080 \             # プロキシポート (デフォルト: 18080、使用中なら自動検索)
   --device mobile \           # デバイスタイプ: mobile または desktop (デフォルト: mobile)
   --inventory ./my-session    # 出力ディレクトリ (デフォルト: ./inventory)
 ```
 
 **録画の流れ:**
 1. プロキシ起動: `./http-playback-proxy recording https://example.com`
-2. ブラウザのプロキシを`127.0.0.1:8080` (または表示されたポート)に設定
+2. ブラウザのプロキシを`127.0.0.1:18080` (または表示されたポート)に設定
 3. ブラウザでWebサイトを訪問
-4. `Ctrl+C`で停止して録画を保存
+4. `Ctrl+C` (またはSIGTERM/SIGINTシグナル送信)で停止して録画を保存
 5. `./inventory/index.json`と`./inventory/contents/`を確認
 
 **手動ブラウジング (エントリURLなし):**
 ```bash
 # プロキシを起動して手動でブラウジング
-./http-playback-proxy recording --port 8080
+./http-playback-proxy recording --port 18080
 ```
 
 #### 再生モード
@@ -74,28 +74,15 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 **全オプション:**
 ```bash
 ./http-playback-proxy playback \
-  --port 8080 \               # プロキシポート (デフォルト: 8080、使用中なら自動検索)
-  --inventory ./my-session \  # 録画データディレクトリ (デフォルト: ./inventory)
-  --control-port 8081         # オプション: /_shutdownと/_reload用のコントロールAPIポート
+  --port 18080 \              # プロキシポート (デフォルト: 18080、使用中なら自動検索)
+  --inventory ./my-session    # 録画データディレクトリ (デフォルト: ./inventory)
 ```
 
 **再生の流れ:**
 1. プロキシ起動: `./http-playback-proxy playback --inventory ./my-session`
-2. ブラウザのプロキシを`127.0.0.1:8080` (または表示されたポート)に設定
+2. ブラウザのプロキシを`127.0.0.1:18080` (または表示されたポート)に設定
 3. 同じWebサイトを訪問 - 録画時のタイミング(±10%)でレスポンスが返される
-4. `Ctrl+C`で停止
-
-**コントロールAPI (オプション `--control-port`):**
-```bash
-# コントロールポート付きで再生を起動
-./http-playback-proxy playback --inventory ./my-session --control-port 8081
-
-# プロキシをグレースフルにシャットダウン
-curl -X POST http://localhost:8081/_shutdown
-
-# ディスクからInventoryを再読み込み (アトミックスワップ)
-curl -X POST http://localhost:8081/_reload
-```
+4. `Ctrl+C` (またはSIGTERM/SIGINTシグナル送信)で停止
 
 #### ブラウザプロキシ設定
 

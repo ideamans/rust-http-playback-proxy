@@ -15,9 +15,9 @@ func setProcAttributes(cmd *exec.Cmd) {
 	}
 }
 
-// stopProcess sends SIGINT to gracefully stop the process on Unix
+// stopProcess sends SIGTERM to gracefully stop the process on Unix
 func stopProcess(proc *os.Process) error {
-	return proc.Signal(syscall.SIGINT)
+	return proc.Signal(syscall.SIGTERM)
 }
 
 // isProcessRunning checks if a process is still running on Unix

@@ -38,7 +38,7 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 
 #### Recording Mode
 
-**Basic recording (auto-searches port from 8080):**
+**Basic recording (auto-searches port from 18080):**
 ```bash
 ./http-playback-proxy recording https://example.com
 ```
@@ -46,22 +46,22 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 **Full options:**
 ```bash
 ./http-playback-proxy recording https://example.com \
-  --port 8080 \              # Proxy port (default: 8080, auto-search if occupied)
+  --port 18080 \             # Proxy port (default: 18080, auto-search if occupied)
   --device mobile \           # Device type: mobile or desktop (default: mobile)
   --inventory ./my-session    # Output directory (default: ./inventory)
 ```
 
 **Recording workflow:**
 1. Start proxy: `./http-playback-proxy recording https://example.com`
-2. Configure browser proxy to `127.0.0.1:8080` (or displayed port)
+2. Configure browser proxy to `127.0.0.1:18080` (or displayed port)
 3. Visit website in browser
-4. Press `Ctrl+C` to stop and save recording
+4. Press `Ctrl+C` (or send SIGTERM/SIGINT) to stop and save recording
 5. Check `./inventory/index.json` and `./inventory/contents/`
 
 **Manual browsing (no entry URL):**
 ```bash
 # Start proxy and browse manually
-./http-playback-proxy recording --port 8080
+./http-playback-proxy recording --port 18080
 ```
 
 #### Playback Mode
@@ -74,28 +74,15 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 **Full options:**
 ```bash
 ./http-playback-proxy playback \
-  --port 8080 \               # Proxy port (default: 8080, auto-search if occupied)
-  --inventory ./my-session \  # Recorded data directory (default: ./inventory)
-  --control-port 8081         # Optional control API port for /_shutdown and /_reload
+  --port 18080 \              # Proxy port (default: 18080, auto-search if occupied)
+  --inventory ./my-session    # Recorded data directory (default: ./inventory)
 ```
 
 **Playback workflow:**
 1. Start proxy: `./http-playback-proxy playback --inventory ./my-session`
-2. Configure browser proxy to `127.0.0.1:8080` (or displayed port)
+2. Configure browser proxy to `127.0.0.1:18080` (or displayed port)
 3. Visit same website - responses match recorded timing (±10%)
-4. Press `Ctrl+C` to stop
-
-**Control API (optional with `--control-port`):**
-```bash
-# Start playback with control port
-./http-playback-proxy playback --inventory ./my-session --control-port 8081
-
-# Gracefully shutdown the proxy
-curl -X POST http://localhost:8081/_shutdown
-
-# Reload inventory from disk (atomic swap)
-curl -X POST http://localhost:8081/_reload
-```
+4. Press `Ctrl+C` (or send SIGTERM/SIGINT) to stop
 
 #### Browser Proxy Configuration
 

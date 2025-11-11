@@ -384,7 +384,6 @@ async fn start_mock_server(port: u16) -> Result<()> {
 fn start_recording_proxy(
     entry_url: &str,
     proxy_port: u16,
-    control_port: u16,
     inventory_dir: &PathBuf,
 ) -> Result<Child> {
     // Use CARGO_MANIFEST_DIR to get workspace root
@@ -418,8 +417,6 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
-                .arg("--control-port")
-                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -432,8 +429,6 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
-            .arg("--control-port")
-            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -459,8 +454,6 @@ fn start_recording_proxy(
                 .arg(entry_url)
                 .arg("--port")
                 .arg(proxy_port.to_string())
-                .arg("--control-port")
-                .arg(control_port.to_string())
                 .arg("--inventory")
                 .arg(inventory_dir.to_str().unwrap())
                 .creation_flags(CREATE_NEW_PROCESS_GROUP)
@@ -480,8 +473,6 @@ fn start_recording_proxy(
             .arg(entry_url)
             .arg("--port")
             .arg(proxy_port.to_string())
-            .arg("--control-port")
-            .arg(control_port.to_string())
             .arg("--inventory")
             .arg(inventory_dir.to_str().unwrap())
             .spawn()?
@@ -1102,7 +1093,6 @@ async fn main() -> Result<()> {
 
     // Use 127.0.0.1 consistently to avoid IPv6/IPv4 mismatch on CI runners
     const MOCK_SERVER_HOST: &str = "127.0.0.1";
-    const RECORDING_CONTROL_PORT: u16 = 18083;
     let mock_server_port = 18080;
     let recording_proxy_port = 18081;
 
@@ -1130,7 +1120,7 @@ async fn main() -> Result<()> {
 
     let entry_url = format!("http://{}:{}/", MOCK_SERVER_HOST, mock_server_port);
     let mut recording_proxy =
-        start_recording_proxy(&entry_url, recording_proxy_port, RECORDING_CONTROL_PORT, &inventory_dir)?;
+        start_recording_proxy(&entry_url, recording_proxy_port, &inventory_dir)?;
 
     // Wait for proxy to start (with retry logic for CI environments where build takes time)
     wait_for_proxy(recording_proxy_port, 60).await?;
@@ -1177,21 +1167,30 @@ async fn main() -> Result<()> {
 
     info!("\nAll requests completed");
 
-    // Send shutdown request via control port for graceful shutdown
-    info!("\nStopping recording proxy via control port");
-    let shutdown_url = format!("http://127.0.0.1:{}/_shutdown", RECORDING_CONTROL_PORT);
-    match reqwest::Client::new().post(&shutdown_url).send().await {
-        Ok(_) => {
-            info!("Shutdown request sent successfully");
-        }
-        Err(e) => {
-            info!("Failed to send shutdown request: {:?}, falling back to SIGINT", e);
-            #[cfg(unix)]
-            unsafe {
-                libc::kill(recording_proxy.id() as i32, libc::SIGINT);
+    // Send signal-based shutdown to recording proxy
+    info!("\nStopping recording proxy via signal (SIGTERM/CTRL_BREAK)");
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{self, Signal};
+        use nix::unistd::Pid;
+        let pid = Pid::from_raw(recording_proxy.id() as i32);
+        match signal::kill(pid, Signal::SIGTERM) {
+            Ok(_) => info!("SIGTERM signal sent successfully"),
+            Err(e) => {
+                error!("Failed to send SIGTERM signal: {:?}", e);
+                let _ = recording_proxy.kill();
             }
-            #[cfg(windows)]
-            {
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        use windows::Win32::System::Console::GenerateConsoleCtrlEvent;
+        use windows::Win32::System::Console::CTRL_BREAK_EVENT;
+        match unsafe { GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, recording_proxy.id()) } {
+            Ok(_) => info!("CTRL_BREAK event sent successfully"),
+            Err(e) => {
+                error!("Failed to send CTRL_BREAK event: {:?}", e);
                 let _ = recording_proxy.kill();
             }
         }

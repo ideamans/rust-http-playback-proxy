@@ -73,18 +73,17 @@ This ensures code quality matches CI requirements exactly and prevents broken co
 # Playback mode
 ./target/release/http-playback-proxy playback \
   --port <port> \
-  --inventory <inventory_dir> \
-  --control-port <control_port>
+  --inventory <inventory_dir>
 
 # Defaults:
-# - Port: auto-search from 8080
+# - Port: auto-search from 18080
 # - Device: mobile
 # - Inventory: ./inventory
-# - Control-port: none (optional)
 
-# Control API (when control-port is specified):
-# - POST /_shutdown - Gracefully shutdown playback proxy
-# - POST /_reload - Reload inventory from disk (atomic swap)
+# Shutdown (signal-based):
+kill $PID                    # Unix: SIGTERM (graceful)
+kill -INT $PID               # Unix: SIGINT (Ctrl+C equivalent)
+# Windows: CTRL_C or CTRL_BREAK in console
 ```
 
 ## Architecture
@@ -144,9 +143,8 @@ Framework-free trait-based DI for testability:
 5. Replay with timing control:
    - Wait until TTFB
    - Send chunks according to `targetTime` (simulating original transfer speed)
-6. Control API (optional, via `--control-port`):
-   - `POST /_shutdown` - Gracefully shutdown proxy
-   - `POST /_reload` - Reload inventory from disk (atomic swap using `Arc<RwLock<Arc<Vec<Transaction>>>>`)
+6. Signal-based control:
+   - SIGTERM/SIGINT - Graceful shutdown (all platforms)
 
 ### Data Type Compatibility
 
@@ -431,3 +429,86 @@ Multi-platform build and release process using GitHub Actions:
    - Publish to npm: `cd typescript && npm publish`
 
 See [README.md](README.md#release-workflow) for detailed workflow.
+
+## Signal Handling Design
+
+**IMPORTANT**: This proxy follows Unix daemon best practices for process control.
+
+### Recording Mode
+
+| Purpose | Unix | Windows | Action |
+|---------|------|---------|--------|
+| Interactive stop | Ctrl+C (SIGINT) | Ctrl+C | Graceful shutdown, save inventory |
+| Programmatic stop | `kill $PID` (SIGTERM) | CTRL_BREAK | Graceful shutdown, save inventory |
+| Force kill | `kill -9 $PID` (SIGKILL) | Task kill | Immediate termination, **no save** |
+
+**Control Port**: Removed - recording uses signal-based shutdown only
+
+**Example**:
+```bash
+# Start recording (uses default port 18080)
+./http-playback-proxy recording https://example.com &
+PID=$!
+
+# Make requests...
+
+# Stop (saves inventory)
+kill $PID              # SIGTERM (preferred)
+# or
+kill -INT $PID         # SIGINT (Ctrl+C equivalent)
+```
+
+### Playback Mode
+
+| Purpose | Unix | Windows | Action |
+|---------|------|---------|--------|
+| Interactive stop | Ctrl+C (SIGINT) | Ctrl+C | Graceful shutdown |
+| Programmatic stop | `kill $PID` (SIGTERM) | CTRL_BREAK | Graceful shutdown |
+| Force kill | `kill -9 $PID` (SIGKILL) | Task kill | Immediate termination |
+
+**Example**:
+```bash
+# Start playback (uses default port 18080)
+./http-playback-proxy playback &
+PID=$!
+
+# Stop
+kill $PID
+```
+
+### Why Signal-Based?
+
+1. **Standard Unix behavior** - Works with systemd, Docker, Kubernetes out-of-box
+2. **Simplified API** - No HTTP overhead for basic operations
+3. **Better ergonomics** - `kill $PID` just works
+4. **nginx-like** - Familiar to ops engineers
+5. **Cross-platform** - Semantic equivalents on Windows
+
+### Compatibility
+
+- **systemd**: `systemctl stop` sends SIGTERM automatically
+- **Docker**: `docker stop` sends SIGTERM, then SIGKILL after timeout
+- **Kubernetes**: Pod termination sends SIGTERM to containers
+- **TypeScript/Go wrappers**: Automatically use correct signals
+
+### Migration from v0.2.x
+
+**Before (v0.2.x)**:
+```typescript
+const proxy = await startRecording({
+  entryUrl: 'https://example.com',
+  controlPort: 8081,  // ← Remove this
+});
+await proxy.stop();  // Used HTTP /_shutdown
+```
+
+**After (v0.3.0+)**:
+```typescript
+const proxy = await startRecording({
+  entryUrl: 'https://example.com',
+  // No controlPort
+});
+await proxy.stop();  // Uses SIGTERM directly
+```
+
+For detailed design rationale and cross-platform implementation details, see [SIGNAL.md](SIGNAL.md).

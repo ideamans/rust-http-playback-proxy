@@ -7,7 +7,6 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::TcpListener;
@@ -20,9 +19,6 @@ use crate::types::Transaction;
 pub async fn start_playback_proxy<F: FileSystem + 'static>(
     port: u16,
     transactions: Vec<Transaction>,
-    control_port: Option<u16>,
-    inventory_dir: PathBuf,
-    file_system: Arc<F>,
 ) -> Result<()> {
     let addr = format!("127.0.0.1:{}", port);
     let listener = TcpListener::bind(&addr).await?;
@@ -39,121 +35,16 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     let (shutdown_tx, _) = broadcast::channel::<()>(1);
     let mut main_shutdown_rx = shutdown_tx.subscribe();
 
-    // Start management API server for shutdown and reload (only if control_port is specified)
-    if let Some(mgmt_port) = control_port {
-        let mgmt_shutdown_tx = shutdown_tx.clone();
-        let mgmt_transactions = shared_transactions.clone();
-        let mgmt_inventory_dir = inventory_dir.clone();
-        let mgmt_file_system = file_system.clone();
+    // Start signal handler task for shutdown signals (SIGTERM/SIGINT)
+    let signal_shutdown_tx = shutdown_tx.clone();
 
-        tokio::spawn(async move {
-            use http_body_util::Full;
-            use hyper::body::Bytes;
-            use std::convert::Infallible;
-
-            async fn handle_mgmt_request<F: FileSystem>(
-                req: Request<Incoming>,
-                shutdown_tx: broadcast::Sender<()>,
-                transactions: Arc<RwLock<Arc<Vec<Transaction>>>>,
-                inventory_dir: PathBuf,
-                file_system: Arc<F>,
-            ) -> Result<Response<Full<Bytes>>, Infallible> {
-                match (req.uri().path(), req.method()) {
-                    ("/_shutdown", &hyper::Method::POST) => {
-                        info!("Received shutdown request via management API");
-                        let _ = shutdown_tx.send(());
-                        Ok(Response::new(Full::new(Bytes::from("Shutting down...\n"))))
-                    }
-                    ("/_reload", &hyper::Method::POST) => {
-                        info!("Received reload request via management API");
-
-                        // Load inventory and convert to transactions in background
-                        match reload_transactions(&inventory_dir, file_system.clone()).await {
-                            Ok(new_transactions) => {
-                                let count = new_transactions.len();
-
-                                // Atomic swap: write new Arc
-                                {
-                                    let mut txn_write = transactions.write().await;
-                                    *txn_write = Arc::new(new_transactions);
-                                }
-
-                                info!("Successfully reloaded {} transactions", count);
-                                Ok(Response::new(Full::new(Bytes::from(format!(
-                                    "Reloaded {} transactions\n",
-                                    count
-                                )))))
-                            }
-                            Err(e) => {
-                                error!("Failed to reload transactions: {}", e);
-                                Ok(Response::builder()
-                                    .status(500)
-                                    .body(Full::new(Bytes::from(format!(
-                                        "Failed to reload: {}\n",
-                                        e
-                                    ))))
-                                    .unwrap())
-                            }
-                        }
-                    }
-                    _ => Ok(Response::builder()
-                        .status(404)
-                        .body(Full::new(Bytes::from("Not found\n")))
-                        .unwrap()),
-                }
-            }
-
-            let addr = std::net::SocketAddr::from(([127, 0, 0, 1], mgmt_port));
-            let listener = match TcpListener::bind(addr).await {
-                Ok(l) => l,
-                Err(e) => {
-                    error!("Failed to bind management API: {}", e);
-                    return;
-                }
-            };
-            info!(
-                "Management API listening on http://127.0.0.1:{} (POST /_shutdown to stop, POST /_reload to reload inventory)",
-                mgmt_port
-            );
-
-            loop {
-                let (stream, _) = match listener.accept().await {
-                    Ok(conn) => conn,
-                    Err(e) => {
-                        error!("Failed to accept connection: {}", e);
-                        continue;
-                    }
-                };
-
-                let io = TokioIo::new(stream);
-                let shutdown_tx = mgmt_shutdown_tx.clone();
-                let transactions = mgmt_transactions.clone();
-                let inventory_dir = mgmt_inventory_dir.clone();
-                let file_system = mgmt_file_system.clone();
-
-                tokio::spawn(async move {
-                    let service = service_fn(move |req| {
-                        handle_mgmt_request(
-                            req,
-                            shutdown_tx.clone(),
-                            transactions.clone(),
-                            inventory_dir.clone(),
-                            file_system.clone(),
-                        )
-                    });
-
-                    if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-                        // IncompleteMessage is normal when client closes connection early
-                        if e.is_incomplete_message() {
-                            info!("Management API client closed connection early");
-                        } else {
-                            error!("Error serving connection: {}", e);
-                        }
-                    }
-                });
-            }
-        });
-    }
+    tokio::spawn(async move {
+        if let Err(e) = super::signal_handler::wait_for_shutdown_signal().await {
+            error!("Signal handler error: {}", e);
+        }
+        info!("Received shutdown signal (SIGTERM/SIGINT)");
+        let _ = signal_shutdown_tx.send(());
+    });
 
     // Main playback server loop with shutdown support
     loop {
@@ -202,27 +93,6 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
 
     info!("Playback proxy stopped");
     Ok(())
-}
-
-async fn reload_transactions<F: FileSystem>(
-    inventory_dir: &PathBuf,
-    file_system: Arc<F>,
-) -> Result<Vec<Transaction>> {
-    use super::{load_inventory, transaction};
-
-    info!("Reloading inventory from {:?}", inventory_dir);
-    let inventory = load_inventory(inventory_dir, file_system.clone()).await?;
-    info!(
-        "Loaded {} resources from inventory",
-        inventory.resources.len()
-    );
-
-    let transactions =
-        transaction::convert_resources_to_transactions(&inventory, inventory_dir, file_system)
-            .await?;
-    info!("Converted to {} transactions", transactions.len());
-
-    Ok(transactions)
 }
 
 async fn handle_playback_request(

@@ -4,6 +4,7 @@ mod beautify;
 mod cli;
 mod playback;
 mod recording;
+mod signal_sender;
 mod traits;
 mod types;
 mod utils;
@@ -22,16 +23,16 @@ async fn main() -> anyhow::Result<()> {
             port,
             device,
             inventory,
-            control_port,
         } => {
-            recording::run_recording_mode(entry_url, port, device, inventory, control_port).await?;
+            recording::run_recording_mode(entry_url, port, device, inventory).await?;
         }
-        Commands::Playback {
-            port,
-            inventory,
-            control_port,
-        } => {
-            playback::run_playback_mode(port, inventory, control_port).await?;
+        Commands::Playback { port, inventory } => {
+            playback::run_playback_mode(port, inventory).await?;
+        }
+        Commands::Signal { pid, kind } => {
+            let signal_kind = signal_sender::SignalKind::from_str(&kind)?;
+            signal_sender::send_signal(pid, signal_kind)?;
+            println!("Signal sent successfully to process {}", pid);
         }
     }
 
