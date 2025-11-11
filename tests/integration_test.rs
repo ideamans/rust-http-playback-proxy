@@ -1394,3 +1394,289 @@ async fn test_http_shutdown() {
 
     println!("HTTP shutdown test completed successfully!");
 }
+#[tokio::test]
+async fn test_playback_reload() {
+    // Test that /_reload endpoint works correctly for playback proxy
+    ensure_binary_exists().await.expect("Binary not found");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let inventory_dir = temp_dir.path().to_path_buf();
+
+    // Start static web server
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to start static server");
+    let server_url = static_server.url();
+
+    let recording_port = find_free_port().expect("Failed to find free port for recording");
+    let playback_port = find_free_port().expect("Failed to find free port for playback");
+    let playback_mgmt_port = find_free_port().expect("Failed to find free port for management");
+
+    // Step 1: Record initial inventory (only index page)
+    println!("Step 1: Recording initial inventory...");
+    let recording_proxy = start_recording_proxy(recording_port, &inventory_dir)
+        .await
+        .expect("Failed to start recording proxy");
+
+    let client = http_client_with_proxy(recording_port).await;
+
+    // Record only index page
+    let response = client
+        .get(&server_url)
+        .send()
+        .await
+        .expect("Request failed");
+    assert!(response.status().is_success());
+    let initial_html = response.text().await.expect("Failed to read response");
+
+    stop_recording_proxy(recording_proxy).await;
+    static_server.shutdown();
+
+    // Verify inventory has only 1 resource
+    let inventory_file = inventory_dir.join("index.json");
+    let inventory_content = tokio::fs::read_to_string(&inventory_file)
+        .await
+        .expect("Failed to read index.json");
+    let inventory: serde_json::Value =
+        serde_json::from_str(&inventory_content).expect("Failed to parse index.json");
+    let resources = inventory["resources"]
+        .as_array()
+        .expect("resources should be an array");
+    assert_eq!(
+        resources.len(),
+        1,
+        "Should have exactly 1 resource initially"
+    );
+
+    // Step 2: Start playback proxy with control port
+    println!("Step 2: Starting playback proxy with control port...");
+    let mut playback_proxy =
+        start_playback_proxy_with_control(playback_port, &inventory_dir, Some(playback_mgmt_port))
+            .await
+            .expect("Failed to start playback proxy");
+
+    let playback_client = http_client_with_proxy(playback_port).await;
+    let mgmt_client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .expect("Failed to create management client");
+
+    // Wait for management API
+    println!(
+        "Waiting for playback management API on port {}...",
+        playback_mgmt_port
+    );
+    let mut mgmt_ready = false;
+    for attempt in 1..=40 {
+        match mgmt_client
+            .get(format!("http://127.0.0.1:{}/_health", playback_mgmt_port))
+            .send()
+            .await
+        {
+            Ok(resp) if resp.status() == 404 => {
+                mgmt_ready = true;
+                println!("Management API ready (attempt {})", attempt);
+                break;
+            }
+            _ => {
+                sleep(Duration::from_millis(500)).await;
+            }
+        }
+    }
+    assert!(mgmt_ready, "Management API should be ready");
+
+    // Step 3: Verify initial playback works
+    println!("Step 3: Verifying initial playback works...");
+    let response = playback_client
+        .get(&server_url)
+        .send()
+        .await
+        .expect("Playback request failed");
+    assert!(
+        response.status().is_success(),
+        "Initial playback should succeed"
+    );
+    let playback_html_v1 = response
+        .text()
+        .await
+        .expect("Failed to read playback response");
+
+    // Normalize and compare
+    let normalized_initial: String = initial_html
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let normalized_playback_v1: String = playback_html_v1
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    assert_eq!(
+        normalized_initial, normalized_playback_v1,
+        "Initial playback should match recorded content"
+    );
+
+    // Step 4: Verify 404 for CSS (not recorded yet)
+    println!("Step 4: Verifying CSS returns 404 (not recorded)...");
+    let css_url = format!("{}/style.css", server_url);
+    let response = playback_client
+        .get(&css_url)
+        .send()
+        .await
+        .expect("CSS request failed");
+    assert_eq!(
+        response.status(),
+        StatusCode::NOT_FOUND,
+        "CSS should return 404 (not recorded)"
+    );
+
+    // Step 5: Re-record with additional resources
+    println!("Step 5: Re-recording with additional resources...");
+
+    // Restart static server
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to restart static server");
+    let server_url = static_server.url();
+    let css_url = format!("{}/style.css", server_url);
+
+    let recording_port2 = find_free_port().expect("Failed to find free port");
+    let recording_proxy2 = start_recording_proxy(recording_port2, &inventory_dir)
+        .await
+        .expect("Failed to start second recording proxy");
+
+    let client2 = http_client_with_proxy(recording_port2).await;
+
+    // Record index + CSS + JS
+    let _ = client2.get(&server_url).send().await;
+    let response = client2
+        .get(&css_url)
+        .send()
+        .await
+        .expect("CSS request failed");
+    assert!(response.status().is_success());
+    let css_content = response.text().await.expect("Failed to read CSS");
+
+    let js_url = format!("{}/script.js", server_url);
+    let _ = client2.get(&js_url).send().await;
+
+    stop_recording_proxy(recording_proxy2).await;
+    static_server.shutdown();
+
+    // Verify inventory now has 3 resources
+    let inventory_content = tokio::fs::read_to_string(&inventory_file)
+        .await
+        .expect("Failed to read updated index.json");
+    let inventory: serde_json::Value =
+        serde_json::from_str(&inventory_content).expect("Failed to parse updated index.json");
+    let resources = inventory["resources"]
+        .as_array()
+        .expect("resources should be an array");
+    assert_eq!(
+        resources.len(),
+        3,
+        "Should have 3 resources after re-recording"
+    );
+
+    // Step 6: Reload inventory via /_reload endpoint
+    println!("Step 6: Reloading inventory via /_reload...");
+    let reload_response = mgmt_client
+        .post(format!("http://127.0.0.1:{}/_reload", playback_mgmt_port))
+        .send()
+        .await
+        .expect("Reload request failed");
+
+    assert!(
+        reload_response.status().is_success(),
+        "Reload should succeed"
+    );
+    let reload_body = reload_response
+        .text()
+        .await
+        .expect("Failed to read reload response");
+    println!("Reload response: {}", reload_body);
+    assert!(
+        reload_body.contains("Reloaded 3 transactions"),
+        "Should report 3 reloaded transactions"
+    );
+
+    // Step 7: Verify CSS is now available after reload
+    println!("Step 7: Verifying CSS is now available after reload...");
+    let response = playback_client
+        .get(&css_url)
+        .send()
+        .await
+        .expect("CSS playback request failed");
+    assert!(
+        response.status().is_success(),
+        "CSS should now return 200 after reload"
+    );
+    let playback_css = response.text().await.expect("Failed to read CSS playback");
+
+    // Normalize and compare CSS
+    let normalized_css: String = css_content.chars().filter(|c| !c.is_whitespace()).collect();
+    let normalized_playback_css: String = playback_css
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    assert_eq!(
+        normalized_css, normalized_playback_css,
+        "CSS playback should match recorded CSS"
+    );
+
+    // Step 8: Verify JS is also available
+    println!("Step 8: Verifying JS is also available after reload...");
+    let response = playback_client
+        .get(&js_url)
+        .send()
+        .await
+        .expect("JS playback request failed");
+    assert!(
+        response.status().is_success(),
+        "JS should return 200 after reload"
+    );
+
+    // Step 9: Verify index page still works (content may have changed due to re-recording)
+    println!("Step 9: Verifying index page still works after reload...");
+    let response = playback_client
+        .get(&server_url)
+        .send()
+        .await
+        .expect("Index playback request failed");
+    assert!(
+        response.status().is_success(),
+        "Index page should still work after reload"
+    );
+    let playback_html_v2 = response
+        .text()
+        .await
+        .expect("Failed to read index playback");
+    assert!(
+        playback_html_v2.contains("Test Page for HTTP Playback Proxy"),
+        "Index should contain expected content"
+    );
+
+    // Step 10: Cleanup
+    println!("Step 10: Cleanup...");
+    let shutdown_response = mgmt_client
+        .post(format!("http://127.0.0.1:{}/_shutdown", playback_mgmt_port))
+        .send()
+        .await
+        .expect("Shutdown request failed");
+    assert!(
+        shutdown_response.status().is_success(),
+        "Shutdown should succeed"
+    );
+
+    // Wait for process to exit
+    let exit_result = timeout(
+        Duration::from_secs(5),
+        tokio::task::spawn_blocking(move || playback_proxy.wait()),
+    )
+    .await
+    .expect("Playback proxy did not exit in time")
+    .expect("Failed to join task");
+    println!("Playback proxy exit result: {:?}", exit_result);
+
+    println!("Playback reload test completed successfully!");
+}
