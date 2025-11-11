@@ -75,7 +75,8 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 ```bash
 ./http-playback-proxy playback \
   --port 8080 \               # Proxy port (default: 8080, auto-search if occupied)
-  --inventory ./my-session    # Recorded data directory (default: ./inventory)
+  --inventory ./my-session \  # Recorded data directory (default: ./inventory)
+  --control-port 8081         # Optional control API port for /_shutdown and /_reload
 ```
 
 **Playback workflow:**
@@ -83,6 +84,18 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 2. Configure browser proxy to `127.0.0.1:8080` (or displayed port)
 3. Visit same website - responses match recorded timing (±10%)
 4. Press `Ctrl+C` to stop
+
+**Control API (optional with `--control-port`):**
+```bash
+# Start playback with control port
+./http-playback-proxy playback --inventory ./my-session --control-port 8081
+
+# Gracefully shutdown the proxy
+curl -X POST http://localhost:8081/_shutdown
+
+# Reload inventory from disk (atomic swap)
+curl -X POST http://localhost:8081/_reload
+```
 
 #### Browser Proxy Configuration
 
@@ -191,7 +204,7 @@ p.Stop()
 
 **Working with inventory:**
 ```go
-// Load inventory
+// Load inventory from index.json
 inventory, err := proxy.LoadInventory("./inventory/index.json")
 if err != nil {
     panic(err)

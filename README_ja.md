@@ -75,7 +75,8 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 ```bash
 ./http-playback-proxy playback \
   --port 8080 \               # プロキシポート (デフォルト: 8080、使用中なら自動検索)
-  --inventory ./my-session    # 録画データディレクトリ (デフォルト: ./inventory)
+  --inventory ./my-session \  # 録画データディレクトリ (デフォルト: ./inventory)
+  --control-port 8081         # オプション: /_shutdownと/_reload用のコントロールAPIポート
 ```
 
 **再生の流れ:**
@@ -83,6 +84,18 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 2. ブラウザのプロキシを`127.0.0.1:8080` (または表示されたポート)に設定
 3. 同じWebサイトを訪問 - 録画時のタイミング(±10%)でレスポンスが返される
 4. `Ctrl+C`で停止
+
+**コントロールAPI (オプション `--control-port`):**
+```bash
+# コントロールポート付きで再生を起動
+./http-playback-proxy playback --inventory ./my-session --control-port 8081
+
+# プロキシをグレースフルにシャットダウン
+curl -X POST http://localhost:8081/_shutdown
+
+# ディスクからInventoryを再読み込み (アトミックスワップ)
+curl -X POST http://localhost:8081/_reload
+```
 
 #### ブラウザプロキシ設定
 
@@ -191,7 +204,7 @@ p.Stop()
 
 **Inventoryの操作:**
 ```go
-// Inventoryを読み込み
+// index.jsonからInventoryを読み込み
 inventory, err := proxy.LoadInventory("./inventory/index.json")
 if err != nil {
     panic(err)
