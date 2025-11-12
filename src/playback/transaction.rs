@@ -55,15 +55,40 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
     };
 
     // Process content based on minify flag
+    // If minification fails, log warning and use original content
     let mut processed_content = if resource.minify.unwrap_or(false) {
-        minify_content(&content, &resource.content_type_mime)?
+        match minify_content(&content, &resource.content_type_mime) {
+            Ok(minified) => minified,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to minify content for {}: {}. Using original content.",
+                    resource.url,
+                    e
+                );
+                content.clone()
+            }
+        }
     } else {
         content
     };
 
     // Re-encode to original charset if this is a text resource with content_charset
+    // If re-encoding fails, log warning and keep UTF-8 content
     if let Some(charset) = &resource.content_charset {
-        processed_content = re_encode_to_charset(&processed_content, charset)?;
+        match re_encode_to_charset(&processed_content, charset) {
+            Ok(reencoded) => {
+                processed_content = reencoded;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to re-encode content for {} to {}: {}. Keeping UTF-8 content.",
+                    resource.url,
+                    charset,
+                    e
+                );
+                // Keep processed_content as-is (UTF-8)
+            }
+        }
     }
 
     // Compress content if needed
@@ -266,7 +291,9 @@ pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Resul
 
 pub fn re_encode_to_charset(content: &[u8], charset_name: &str) -> Result<Vec<u8>> {
     // File content is stored as UTF-8, convert it back to original charset
-    let utf8_str = std::str::from_utf8(content)?;
+    // Use from_utf8_lossy to handle any invalid UTF-8 sequences that may have been introduced
+    // during beautification (e.g., from binary data or encoding issues)
+    let utf8_str = String::from_utf8_lossy(content);
 
     // Get the target encoding
     let encoding = Encoding::for_label(charset_name.as_bytes())
@@ -278,6 +305,6 @@ pub fn re_encode_to_charset(content: &[u8], charset_name: &str) -> Result<Vec<u8
     }
 
     // Encode from UTF-8 to target charset
-    let (encoded, _encoding_used, _had_errors) = encoding.encode(utf8_str);
+    let (encoded, _encoding_used, _had_errors) = encoding.encode(&utf8_str);
     Ok(encoded.into_owned())
 }
