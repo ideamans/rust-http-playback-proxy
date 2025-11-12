@@ -266,7 +266,9 @@ pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Resul
 
 pub fn re_encode_to_charset(content: &[u8], charset_name: &str) -> Result<Vec<u8>> {
     // File content is stored as UTF-8, convert it back to original charset
-    let utf8_str = std::str::from_utf8(content)?;
+    // Use from_utf8_lossy to handle any invalid UTF-8 sequences that may have been introduced
+    // during beautification (e.g., from binary data or encoding issues)
+    let utf8_str = String::from_utf8_lossy(content);
 
     // Get the target encoding
     let encoding = Encoding::for_label(charset_name.as_bytes())
@@ -278,6 +280,6 @@ pub fn re_encode_to_charset(content: &[u8], charset_name: &str) -> Result<Vec<u8
     }
 
     // Encode from UTF-8 to target charset
-    let (encoded, _encoding_used, _had_errors) = encoding.encode(utf8_str);
+    let (encoded, _encoding_used, _had_errors) = encoding.encode(&utf8_str);
     Ok(encoded.into_owned())
 }
