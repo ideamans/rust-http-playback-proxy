@@ -168,6 +168,9 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
 
         // Save content to file
         // If minified, save the beautified version for better editability
+        // NOTE: Content is saved as UTF-8, but charset declarations (like <meta charset="Shift_JIS">)
+        // are PRESERVED in the file. During playback, the content will be re-encoded to the original
+        // charset based on resource.content_charset metadata.
         let content_to_save = if is_minified {
             beautified
         } else {
