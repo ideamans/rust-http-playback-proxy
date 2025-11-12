@@ -215,12 +215,17 @@ mod tests {
         // Verify content_charset is preserved (contains the original charset from Content-Type)
         assert_eq!(resource.content_charset, Some("Shift_JIS".to_string()));
 
-        // Verify meta tag was NOT modified (kept original Shift_JIS)
+        // Verify meta tag is PRESERVED (not modified to UTF-8)
+        // Files are stored as UTF-8, but charset declarations remain as-is
+        // During playback, content will be re-encoded to Shift_JIS based on resource.content_charset
         let file_path = inventory_dir.join(resource.content_file_path.as_ref().unwrap());
         let saved_content = mock_fs.read_to_string(&file_path).await.unwrap();
         assert!(
-            saved_content.contains(r#"<meta charset="Shift_JIS">"#)
-                || saved_content.contains(r#"<meta charset="shift_jis">"#)
+            saved_content.contains(r#"charset="Shift_JIS""#)
+                || saved_content.contains(r#"charset='Shift_JIS'"#)
+                || saved_content.contains(r#"charset=Shift_JIS"#),
+            "Expected original charset declaration (Shift_JIS) to be preserved, but got: {}",
+            saved_content
         );
     }
 }

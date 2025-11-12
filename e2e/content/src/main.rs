@@ -751,6 +751,68 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
                     let content = fs::read_to_string(&full_path)?;
                     // If we can read it as UTF-8 string, it's stored as UTF-8
                     info!("  ✓ Content file stored as UTF-8: {} bytes", content.len());
+
+                    // Verify charset declarations are PRESERVED in content
+                    // (Content is UTF-8, but charset declarations remain unchanged for playback)
+                    if url.contains("-shiftjis.") {
+                        // For HTML files
+                        if url.ends_with(".html") {
+                            // Should contain original Shift_JIS charset declaration
+                            let has_shiftjis_meta = content.contains(r#"charset="Shift_JIS""#) ||
+                                                   content.contains(r#"charset='Shift_JIS'"#) ||
+                                                   content.contains(r#"charset=Shift_JIS"#);
+                            if !has_shiftjis_meta {
+                                anyhow::bail!(
+                                    "HTML content should preserve original Shift_JIS charset declaration in: {}",
+                                    url
+                                );
+                            }
+                            info!("  ✓ HTML charset declaration preserved (Shift_JIS)");
+                        }
+
+                        // For CSS files
+                        if url.ends_with(".css") {
+                            // Should contain original Shift_JIS @charset declaration
+                            let has_shiftjis_charset = content.contains(r#"@charset "Shift_JIS""#) ||
+                                                      content.contains(r#"@charset 'Shift_JIS'"#);
+                            if !has_shiftjis_charset {
+                                anyhow::bail!(
+                                    "CSS content should preserve original Shift_JIS @charset declaration in: {}",
+                                    url
+                                );
+                            }
+                            info!("  ✓ CSS @charset declaration preserved (Shift_JIS)");
+                        }
+                    } else if url.contains("-eucjp.") {
+                        // For HTML files
+                        if url.ends_with(".html") {
+                            // Should contain original EUC-JP charset declaration
+                            let has_eucjp_meta = content.contains(r#"charset="EUC-JP""#) ||
+                                                content.contains(r#"charset='EUC-JP'"#) ||
+                                                content.contains(r#"charset=EUC-JP"#);
+                            if !has_eucjp_meta {
+                                anyhow::bail!(
+                                    "HTML content should preserve original EUC-JP charset declaration in: {}",
+                                    url
+                                );
+                            }
+                            info!("  ✓ HTML charset declaration preserved (EUC-JP)");
+                        }
+
+                        // For CSS files
+                        if url.ends_with(".css") {
+                            // Should contain original EUC-JP @charset declaration
+                            let has_eucjp_charset = content.contains(r#"@charset "EUC-JP""#) ||
+                                                   content.contains(r#"@charset 'EUC-JP'"#);
+                            if !has_eucjp_charset {
+                                anyhow::bail!(
+                                    "CSS content should preserve original EUC-JP @charset declaration in: {}",
+                                    url
+                                );
+                            }
+                            info!("  ✓ CSS @charset declaration preserved (EUC-JP)");
+                        }
+                    }
                 }
             }
         }
