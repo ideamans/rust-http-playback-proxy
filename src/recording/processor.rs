@@ -139,11 +139,25 @@ impl<F: FileSystem, T: TimeProvider> RequestProcessor<F, T> {
             self.convert_to_utf8(body, &resource.content_charset);
 
         // Check if content was minified by beautifying and comparing line counts
+        // If beautification fails, log warning and save original UTF-8 content
         let original_lines = utf8_content.lines().count();
-        let beautified = self.beautify_content(&utf8_content, &resource.content_type_mime)?;
-        let beautified_lines = beautified.lines().count();
+        let (beautified, is_minified) = match self.beautify_content(&utf8_content, &resource.content_type_mime) {
+            Ok(beautified) => {
+                let beautified_lines = beautified.lines().count();
+                let is_minified = beautified_lines >= original_lines * 2;
+                (beautified, is_minified)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to beautify content for {}: {}. Saving original UTF-8 content.",
+                    resource.url,
+                    e
+                );
+                // Use original content, mark as not minified
+                (utf8_content.clone(), false)
+            }
+        };
 
-        let is_minified = beautified_lines >= original_lines * 2;
         resource.minify = Some(is_minified);
 
         // Save content to file

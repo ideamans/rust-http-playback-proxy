@@ -55,15 +55,40 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
     };
 
     // Process content based on minify flag
+    // If minification fails, log warning and use original content
     let mut processed_content = if resource.minify.unwrap_or(false) {
-        minify_content(&content, &resource.content_type_mime)?
+        match minify_content(&content, &resource.content_type_mime) {
+            Ok(minified) => minified,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to minify content for {}: {}. Using original content.",
+                    resource.url,
+                    e
+                );
+                content.clone()
+            }
+        }
     } else {
         content
     };
 
     // Re-encode to original charset if this is a text resource with content_charset
+    // If re-encoding fails, log warning and keep UTF-8 content
     if let Some(charset) = &resource.content_charset {
-        processed_content = re_encode_to_charset(&processed_content, charset)?;
+        match re_encode_to_charset(&processed_content, charset) {
+            Ok(reencoded) => {
+                processed_content = reencoded;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to re-encode content for {} to {}: {}. Keeping UTF-8 content.",
+                    resource.url,
+                    charset,
+                    e
+                );
+                // Keep processed_content as-is (UTF-8)
+            }
+        }
     }
 
     // Compress content if needed
