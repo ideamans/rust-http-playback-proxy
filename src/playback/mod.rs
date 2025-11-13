@@ -5,6 +5,7 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+mod hudsucker_handler;
 mod proxy;
 mod signal_handler;
 mod tests;
