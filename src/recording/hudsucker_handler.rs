@@ -2,7 +2,7 @@ use http_body_util::{BodyExt, Full};
 use hudsucker::{
     Body, HttpContext, HttpHandler, RequestOrResponse, hyper::Request, hyper::Response,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,19 +15,26 @@ use crate::types::Resource;
 
 #[derive(Debug, Clone)]
 struct RequestInfo {
-    method: String,
-    url: String,
     request_start: Instant,
     elapsed_since_start: u64,
+}
+
+/// Unique key for matching requests and responses using HttpContext information
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+struct RequestKey {
+    client_addr: SocketAddr,
+    method: String,
+    url: String,
 }
 
 #[derive(Clone)]
 pub struct RecordingHandler {
     shared_inventory: Arc<Mutex<Inventory>>,
     start_time: Arc<Instant>,
-    // Connection-based FIFO queues: each client address has its own request queue
-    // This handles HTTP/1.1 pipelining and ensures correct request-response pairing per connection
-    request_infos: Arc<Mutex<HashMap<SocketAddr, VecDeque<RequestInfo>>>>,
+    // Request info indexed by (client_addr, method, url) from HttpContext
+    // With ideamans-hudsucker 0.25+, HttpContext includes request_method and request_uri
+    // This allows accurate request-response correlation even with HTTP/2 multiplexing
+    request_infos: Arc<Mutex<HashMap<RequestKey, RequestInfo>>>,
     request_counter: Arc<Mutex<u64>>,
 }
 
@@ -103,18 +110,23 @@ impl HttpHandler for RecordingHandler {
             };
 
             // Store request information for correlation with response
-            // Use connection-based FIFO: push to the back of this client's queue
+            // With ideamans-hudsucker 0.25+, we can use (client_addr, method, url) as unique key
+            // because HttpContext includes request_method and request_uri in handle_response
+            let key = RequestKey {
+                client_addr,
+                method: method.to_string(),
+                url: url.clone(),
+            };
+
             {
                 let mut infos = request_infos.lock().await;
-                infos
-                    .entry(client_addr)
-                    .or_insert_with(VecDeque::new)
-                    .push_back(RequestInfo {
-                        method: method.to_string(),
-                        url: url.clone(),
+                infos.insert(
+                    key,
+                    RequestInfo {
                         request_start,
                         elapsed_since_start,
-                    });
+                    },
+                );
             }
 
             RequestOrResponse::Request(req)
@@ -128,6 +140,8 @@ impl HttpHandler for RecordingHandler {
     ) -> impl Future<Output = Response<Body>> + Send {
         let status = res.status();
         let client_addr = ctx.client_addr;
+        let request_method = ctx.request_method.clone();
+        let request_uri = ctx.request_uri.clone();
 
         let start_time = Arc::clone(&self.start_time);
         let request_infos = Arc::clone(&self.request_infos);
@@ -141,6 +155,21 @@ impl HttpHandler for RecordingHandler {
 
             info!("Recording response: {}", status);
 
+            // Build request key from HttpContext (available in ideamans-hudsucker 0.25+)
+            // This allows accurate request-response correlation even with HTTP/2 multiplexing
+            let url = request_uri.to_string();
+            let key = RequestKey {
+                client_addr,
+                method: request_method.to_string(),
+                url: url.clone(),
+            };
+
+            // Retrieve and remove request info using the key
+            let request_info = {
+                let mut infos = request_infos.lock().await;
+                infos.remove(&key)
+            };
+
             let (parts, body) = res.into_parts();
 
             // Buffer the entire response body (as-is, possibly compressed)
@@ -152,18 +181,7 @@ impl HttpHandler for RecordingHandler {
                 }
             };
 
-            // Find matching request info using connection-based FIFO
-            // Pop from the front of this client's queue (oldest request first)
-            let request_info = {
-                let mut infos = request_infos.lock().await;
-                if let Some(queue) = infos.get_mut(&client_addr) {
-                    queue.pop_front()
-                } else {
-                    None
-                }
-            };
-
-            let (method_str, url, ttfb_ms, duration_ms) = if let Some(info) = request_info {
+            let (method_str, url_for_resource, ttfb_ms, duration_ms) = if let Some(info) = request_info {
                 // Calculate TTFB relative to request start (pure TTFB duration)
                 let ttfb = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
                 // Store only the pure TTFB, not the absolute time
@@ -179,23 +197,26 @@ impl HttpHandler for RecordingHandler {
 
                 info!(
                     "Matched response with request: {} {} (TTFB: {}ms, duration: {}ms, request offset: {}ms)",
-                    info.method, info.url, ttfb, duration_ms, info.elapsed_since_start
+                    request_method, url, ttfb, duration_ms, info.elapsed_since_start
                 );
 
-                (info.method, info.url, ttfb_ms, duration_ms)
+                (request_method.to_string(), url.clone(), ttfb_ms, duration_ms)
             } else {
-                // Fallback - this should rarely happen with connection-based FIFO
-                error!("No matching request info found for client: {}", client_addr);
+                // Fallback - this should not happen with ideamans-hudsucker 0.25+ unless request was not recorded
+                error!(
+                    "No matching request info found for: {} {} (client: {})",
+                    request_method, url, client_addr
+                );
                 let elapsed = ttfb_instant.duration_since(*start_time).as_millis() as u64;
                 let download_end = Instant::now();
                 let download_end_elapsed =
                     download_end.duration_since(*start_time).as_millis() as u64;
                 let duration = download_end_elapsed.saturating_sub(elapsed);
-                ("GET".to_string(), "unknown".to_string(), elapsed, duration)
+                (request_method.to_string(), url.clone(), elapsed, duration)
             };
 
             // Create resource with minimal processing
-            let mut resource = Resource::new(method_str, url.clone());
+            let mut resource = Resource::new(method_str, url_for_resource);
             resource.status_code = Some(status.as_u16());
             resource.ttfb_ms = ttfb_ms;
             resource.duration_ms = Some(duration_ms);
