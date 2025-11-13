@@ -40,121 +40,121 @@ impl HttpHandler for PlaybackHandler {
         let start_time = self.start_time.clone();
 
         async move {
-        let method = req.method().to_string();
-        let uri = req.uri().clone();
-        let headers = req.headers();
+            let method = req.method().to_string();
+            let uri = req.uri().clone();
+            let headers = req.headers();
 
-        // Skip CONNECT requests - they are for tunnel establishment, not actual HTTP requests
-        if method == "CONNECT" {
-            info!("Skipping CONNECT request (tunnel): {}", uri);
-            return RequestOrResponse::Request(req);
-        }
+            // Skip CONNECT requests - they are for tunnel establishment, not actual HTTP requests
+            if method == "CONNECT" {
+                info!("Skipping CONNECT request (tunnel): {}", uri);
+                return RequestOrResponse::Request(req);
+            }
 
-        // Reconstruct full URL from URI and Host header (including query parameters)
-        let url = if uri.scheme().is_some() {
-            // Full URL in request (proxy-style)
-            uri.to_string()
-        } else {
-            // Relative URL - reconstruct from Host header
-            if let Some(host) = headers.get("host") {
-                if let Ok(host_str) = host.to_str() {
-                    // Use https by default for recorded resources
-                    // Include query parameters if present
-                    if let Some(query) = uri.query() {
-                        format!("https://{}{}?{}", host_str, uri.path(), query)
+            // Reconstruct full URL from URI and Host header (including query parameters)
+            let url = if uri.scheme().is_some() {
+                // Full URL in request (proxy-style)
+                uri.to_string()
+            } else {
+                // Relative URL - reconstruct from Host header
+                if let Some(host) = headers.get("host") {
+                    if let Ok(host_str) = host.to_str() {
+                        // Use https by default for recorded resources
+                        // Include query parameters if present
+                        if let Some(query) = uri.query() {
+                            format!("https://{}{}?{}", host_str, uri.path(), query)
+                        } else {
+                            format!("https://{}{}", host_str, uri.path())
+                        }
                     } else {
-                        format!("https://{}{}", host_str, uri.path())
+                        uri.to_string()
                     }
                 } else {
                     uri.to_string()
                 }
-            } else {
-                uri.to_string()
-            }
-        };
+            };
 
-        info!(
-            "Handling playback request: {} {} (reconstructed URL: {})",
-            method, uri, url
-        );
+            info!(
+                "Handling playback request: {} {} (reconstructed URL: {})",
+                method, uri, url
+            );
 
-        // Extract request components for matching
-        let request_path = uri.path();
-        let request_query = uri.query();
-        let request_host = headers
-            .get("host")
-            .and_then(|h| h.to_str().ok())
-            .or_else(|| uri.authority().map(|a| a.as_str()));
+            // Extract request components for matching
+            let request_path = uri.path();
+            let request_query = uri.query();
+            let request_host = headers
+                .get("host")
+                .and_then(|h| h.to_str().ok())
+                .or_else(|| uri.authority().map(|a| a.as_str()));
 
-        info!(
-            "Looking for transaction: method={}, host={:?}, path={}, query={:?}",
-            method, request_host, request_path, request_query
-        );
+            info!(
+                "Looking for transaction: method={}, host={:?}, path={}, query={:?}",
+                method, request_host, request_path, request_query
+            );
 
-        // Read transactions with RwLock
-        let transactions_snapshot = {
-            let txn_read = transactions.read().await;
-            txn_read.clone() // Clone the Arc<Vec<Transaction>>
-        };
+            // Read transactions with RwLock
+            let transactions_snapshot = {
+                let txn_read = transactions.read().await;
+                txn_read.clone() // Clone the Arc<Vec<Transaction>>
+            };
 
-        info!(
-            "Total transactions available: {}",
-            transactions_snapshot.len()
-        );
+            info!(
+                "Total transactions available: {}",
+                transactions_snapshot.len()
+            );
 
-        // Debug: List all available transactions
-        for (idx, t) in transactions_snapshot.iter().enumerate() {
-            if let Ok(transaction_uri) = t.url.parse::<hyper::Uri>() {
-                let t_host = transaction_uri.authority().map(|a| a.as_str());
-                info!(
-                    "  Transaction[{}]: method={}, host={:?}, url={}, path={}, query={:?}",
-                    idx,
-                    t.method,
-                    t_host,
-                    t.url,
-                    transaction_uri.path(),
-                    transaction_uri.query()
-                );
-            }
-        }
-
-        let transaction = transactions_snapshot
-            .iter()
-            .find(|t| {
-                // Match method
-                if t.method != method {
-                    return false;
-                }
-
-                // Parse transaction URL to extract components
+            // Debug: List all available transactions
+            for (idx, t) in transactions_snapshot.iter().enumerate() {
                 if let Ok(transaction_uri) = t.url.parse::<hyper::Uri>() {
-                    let t_path = transaction_uri.path();
-                    let t_query = transaction_uri.query();
                     let t_host = transaction_uri.authority().map(|a| a.as_str());
-
-                    // Match host (if available in both request and transaction)
-                    // This prevents cross-origin mismatches
-                    let host_matches = match (request_host, t_host) {
-                        (Some(req_h), Some(t_h)) => req_h == t_h,
-                        // If either is missing, fall back to path-only matching for backward compatibility
-                        _ => true,
-                    };
-
-                    // Match path and query
-                    let matches = host_matches && t_path == request_path && t_query == request_query;
-                    if matches {
-                        info!("Found matching transaction: {}", t.url);
-                    }
-                    matches
-                } else {
-                    false
+                    info!(
+                        "  Transaction[{}]: method={}, host={:?}, url={}, path={}, query={:?}",
+                        idx,
+                        t.method,
+                        t_host,
+                        t.url,
+                        transaction_uri.path(),
+                        transaction_uri.query()
+                    );
                 }
-            })
-            .cloned();
+            }
 
-        match transaction {
-            Some(transaction) => {
-                match serve_transaction(transaction, start_time).await {
+            let transaction = transactions_snapshot
+                .iter()
+                .find(|t| {
+                    // Match method
+                    if t.method != method {
+                        return false;
+                    }
+
+                    // Parse transaction URL to extract components
+                    if let Ok(transaction_uri) = t.url.parse::<hyper::Uri>() {
+                        let t_path = transaction_uri.path();
+                        let t_query = transaction_uri.query();
+                        let t_host = transaction_uri.authority().map(|a| a.as_str());
+
+                        // Match host (if available in both request and transaction)
+                        // This prevents cross-origin mismatches
+                        let host_matches = match (request_host, t_host) {
+                            (Some(req_h), Some(t_h)) => req_h == t_h,
+                            // If either is missing, fall back to path-only matching for backward compatibility
+                            _ => true,
+                        };
+
+                        // Match path and query
+                        let matches =
+                            host_matches && t_path == request_path && t_query == request_query;
+                        if matches {
+                            info!("Found matching transaction: {}", t.url);
+                        }
+                        matches
+                    } else {
+                        false
+                    }
+                })
+                .cloned();
+
+            match transaction {
+                Some(transaction) => match serve_transaction(transaction, start_time).await {
                     Ok(response) => RequestOrResponse::Response(response),
                     Err(e) => {
                         error!("Error serving transaction: {}", e);
@@ -164,35 +164,28 @@ impl HttpHandler for PlaybackHandler {
                             .unwrap();
                         RequestOrResponse::Response(response)
                     }
+                },
+                None => {
+                    info!(
+                        "No transaction found for: {} {} (url: {})",
+                        method, uri, url
+                    );
+                    let response = Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(Body::from(format!(
+                            "Resource not found in playback data: {} {}",
+                            method, url
+                        )))
+                        .unwrap();
+                    RequestOrResponse::Response(response)
                 }
             }
-            None => {
-                info!(
-                    "No transaction found for: {} {} (url: {})",
-                    method, uri, url
-                );
-                let response = Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::from(format!(
-                        "Resource not found in playback data: {} {}",
-                        method, url
-                    )))
-                    .unwrap();
-                RequestOrResponse::Response(response)
-            }
-        }
         }
     }
 
-    fn handle_response(
-        &mut self,
-        _ctx: &HttpContext,
-        res: Response<Body>,
-    ) -> impl Future<Output = Response<Body>> + Send {
-        async move {
-            // Pass through responses unchanged
-            res
-        }
+    async fn handle_response(&mut self, _ctx: &HttpContext, res: Response<Body>) -> Response<Body> {
+        // Pass through responses unchanged
+        res
     }
 }
 
@@ -368,9 +361,7 @@ async fn serve_transaction(
     // Convert to Hudsucker's Body type using from_stream
     // Map the stream to extract bytes from frames
     use futures::TryStreamExt;
-    let bytes_stream = stream_body.map_ok(|frame| {
-        frame.into_data().unwrap_or_default()
-    });
+    let bytes_stream = stream_body.map_ok(|frame| frame.into_data().unwrap_or_default());
 
     let body = Body::from_stream(bytes_stream);
 

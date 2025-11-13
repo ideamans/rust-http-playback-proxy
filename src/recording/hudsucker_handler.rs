@@ -181,7 +181,9 @@ impl HttpHandler for RecordingHandler {
                 }
             };
 
-            let (method_str, url_for_resource, ttfb_ms, duration_ms) = if let Some(info) = request_info {
+            let (method_str, url_for_resource, ttfb_ms, duration_ms) = if let Some(info) =
+                request_info
+            {
                 // Calculate TTFB relative to request start (pure TTFB duration)
                 let ttfb = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
                 // Store only the pure TTFB, not the absolute time
@@ -200,7 +202,12 @@ impl HttpHandler for RecordingHandler {
                     request_method, url, ttfb, duration_ms, info.elapsed_since_start
                 );
 
-                (request_method.to_string(), url.clone(), ttfb_ms, duration_ms)
+                (
+                    request_method.to_string(),
+                    url.clone(),
+                    ttfb_ms,
+                    duration_ms,
+                )
             } else {
                 // Fallback - this should not happen with ideamans-hudsucker 0.25+ unless request was not recorded
                 error!(
