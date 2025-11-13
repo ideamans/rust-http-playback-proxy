@@ -1,6 +1,6 @@
 {
   "name": "rust-http-playback-proxy",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "HTTP traffic recording and playback proxy with precise timing control for PageSpeed optimization and performance testing",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
