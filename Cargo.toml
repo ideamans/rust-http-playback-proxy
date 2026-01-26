@@ -2,6 +2,10 @@
 name = "http-playback-proxy"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+authors = ["Kunihiko Miyanaga <miyanaga@ideamans.com>"]
+description = "HTTP Playback Proxy - A MITM proxy for recording and replaying HTTP traffic with precise timing control"
+repository = "https://github.com/pagespeed-quest/rust-http-playback-proxy"
 
 
 [dependencies]
