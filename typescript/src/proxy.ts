@@ -1,8 +1,61 @@
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as net from 'net';
 import { ensureBinary, getFullBinaryPath } from './binary';
 import type { ProxyMode, RecordingOptions, PlaybackOptions, Inventory } from './types';
+
+/**
+ * Find an available port by binding to port 0 and releasing it
+ */
+async function getAvailablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (address && typeof address === 'object') {
+        const port = address.port;
+        server.close(() => resolve(port));
+      } else {
+        server.close(() => reject(new Error('Failed to get port from server address')));
+      }
+    });
+    server.on('error', reject);
+  });
+}
+
+/**
+ * Wait for a port to become available (accepting connections)
+ * Uses TCP connection attempts with exponential backoff
+ */
+async function waitForPort(port: number, timeoutMs: number = 60000): Promise<void> {
+  const startTime = Date.now();
+  let delay = 50; // Start with 50ms delay
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const socket = net.createConnection({ port, host: '127.0.0.1' });
+        socket.on('connect', () => {
+          socket.destroy();
+          resolve();
+        });
+        socket.on('error', reject);
+        socket.setTimeout(1000, () => {
+          socket.destroy();
+          reject(new Error('Connection timeout'));
+        });
+      });
+      return; // Port is open
+    } catch {
+      // Port not ready yet, wait and retry
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 1.5, 500); // Exponential backoff, max 500ms
+    }
+  }
+
+  throw new Error(`Timeout waiting for port ${port} to become available`);
+}
 
 /**
  * Represents a running proxy instance
@@ -31,17 +84,10 @@ export class Proxy {
   }
 
   /**
-   * Get the actual port number (may differ from requested port if 0 was used)
+   * Get the actual port number
    */
   get port(): number {
     return this._port;
-  }
-
-  /**
-   * Update the port number (used internally when OS assigns a port)
-   */
-  updatePort(port: number): void {
-    this._port = port;
   }
 
   /**
@@ -54,7 +100,6 @@ export class Proxy {
   /**
    * Stop the proxy gracefully
    * Sends SIGTERM signal (cross-platform)
-   * Node.js automatically converts to appropriate signal on Windows (CTRL_BREAK)
    */
   async stop(): Promise<void> {
     if (!this.process) {
@@ -86,14 +131,10 @@ export class Proxy {
         }
       });
 
-      // Send platform-appropriate signal:
-      // Unix: SIGTERM (standard kill signal)
-      // Windows: Use signal subcommand to send CTRL_BREAK via Windows API
+      // Send platform-appropriate signal
       try {
         if (process.platform === 'win32') {
           // On Windows, use the signal subcommand to send CTRL_BREAK
-          // The subcommand uses FreeConsole + AttachConsole + GenerateConsoleCtrlEvent
-          // to properly deliver console control events to the target process
           const binaryPath = getFullBinaryPath();
           const { spawnSync } = require('child_process');
           const result = spawnSync(
@@ -133,7 +174,6 @@ export class Proxy {
       return false;
     }
 
-    // Check if process is still alive
     try {
       process.kill(this.process.pid!, 0);
       return true;
@@ -163,7 +203,6 @@ export class Proxy {
 
   /**
    * Load the inventory for this proxy
-   * This is useful after recording is complete
    */
   async getInventory(): Promise<Inventory> {
     const inventoryPath = path.join(this.inventoryDir, 'index.json');
@@ -179,8 +218,14 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
 
   const binaryPath = getFullBinaryPath();
 
-  // Set defaults to match CLI behavior
-  const port = options.port !== undefined ? options.port : 18080;
+  // Get an available port if not specified or if 0
+  let port: number;
+  if (options.port === undefined || options.port === 0) {
+    port = await getAvailablePort();
+  } else {
+    port = options.port;
+  }
+
   const deviceType = options.deviceType || 'mobile';
   const inventoryDir = options.inventoryDir || './inventory';
 
@@ -192,10 +237,8 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
     args.push(options.entryUrl);
   }
 
-  // Add port option (only if explicitly specified and not 0 or default)
-  if (options.port !== undefined && options.port !== 0 && options.port !== 18080) {
-    args.push('--port', port.toString());
-  }
+  // Always specify the port explicitly
+  args.push('--port', port.toString());
 
   // Add device type
   args.push('--device', deviceType);
@@ -203,11 +246,9 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
-  // Note: control-port removed from recording mode - uses signal-based shutdown only
-
-  // Start the process with piped stdout to capture port info
+  // Start the process
   const spawnOptions: any = {
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: ['ignore', 'inherit', 'inherit'],
     detached: false,
   };
 
@@ -220,49 +261,26 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   const proxy = new Proxy('recording', port, inventoryDir, options.entryUrl, deviceType);
   proxy.setProcess(proc);
 
-  // Capture stdout to extract actual port number when using port 0
-  return new Promise((resolve, reject) => {
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        resolve(proxy);
-      }
-    }, 2000);
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      // Look for "Recording proxy listening on 127.0.0.1:XXXXX" or "Playback proxy listening on 127.0.0.1:XXXXX"
-      const match = output.match(/proxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/i);
-      if (match && match[1]) {
-        const actualPort = parseInt(match[1], 10);
-        proxy.updatePort(actualPort);
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          resolve(proxy);
-        }
-      }
-      // Forward output to console
-      process.stdout.write(data);
-    });
-
-    proc.on('error', (err) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(err);
-      }
-    });
-
-    proc.on('exit', (code) => {
-      if (!resolved && code !== 0) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(new Error(`Proxy exited with code ${code}`));
-      }
-    });
+  // Handle early exit
+  let exited = false;
+  proc.on('exit', (code) => {
+    exited = true;
+    if (code !== 0 && code !== null) {
+      console.error(`Proxy process exited early with code ${code}`);
+    }
   });
+
+  // Wait for the port to become available
+  try {
+    await waitForPort(port, 15000);
+  } catch (err) {
+    if (exited) {
+      throw new Error('Proxy process exited before port became available');
+    }
+    throw err;
+  }
+
+  return proxy;
 }
 
 /**
@@ -272,9 +290,6 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   await ensureBinary();
 
   const binaryPath = getFullBinaryPath();
-
-  // Set defaults
-  const port = options.port !== undefined ? options.port : 18080;
   const inventoryDir = options.inventoryDir || './inventory';
 
   // Verify inventory exists
@@ -283,20 +298,26 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
     throw new Error(`Inventory file not found at ${inventoryPath}`);
   }
 
+  // Get an available port if not specified or if 0
+  let port: number;
+  if (options.port === undefined || options.port === 0) {
+    port = await getAvailablePort();
+  } else {
+    port = options.port;
+  }
+
   // Build command
   const args: string[] = ['playback'];
 
-  // Add port option (only if not default)
-  if (options.port !== undefined && options.port !== 18080) {
-    args.push('--port', port.toString());
-  }
+  // Always specify the port explicitly
+  args.push('--port', port.toString());
 
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
-  // Start the process with piped stdout to capture port info
+  // Start the process
   const spawnOptions: any = {
-    stdio: ['ignore', 'pipe', 'inherit'],
+    stdio: ['ignore', 'inherit', 'inherit'],
     detached: false,
   };
 
@@ -309,49 +330,26 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   const proxy = new Proxy('playback', port, inventoryDir);
   proxy.setProcess(proc);
 
-  // Capture stdout to extract actual port number when using port 0
-  return new Promise((resolve, reject) => {
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        resolve(proxy);
-      }
-    }, 2000);
-
-    proc.stdout?.on('data', (data: Buffer) => {
-      const output = data.toString();
-      // Look for "Playback proxy listening on 127.0.0.1:XXXXX"
-      const match = output.match(/proxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/i);
-      if (match && match[1]) {
-        const actualPort = parseInt(match[1], 10);
-        proxy.updatePort(actualPort);
-        if (!resolved) {
-          resolved = true;
-          clearTimeout(timeout);
-          resolve(proxy);
-        }
-      }
-      // Forward output to console
-      process.stdout.write(data);
-    });
-
-    proc.on('error', (err) => {
-      if (!resolved) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(err);
-      }
-    });
-
-    proc.on('exit', (code) => {
-      if (!resolved && code !== 0) {
-        resolved = true;
-        clearTimeout(timeout);
-        reject(new Error(`Proxy exited with code ${code}`));
-      }
-    });
+  // Handle early exit
+  let exited = false;
+  proc.on('exit', (code) => {
+    exited = true;
+    if (code !== 0 && code !== null) {
+      console.error(`Proxy process exited early with code ${code}`);
+    }
   });
+
+  // Wait for the port to become available
+  try {
+    await waitForPort(port, 15000);
+  } catch (err) {
+    if (exited) {
+      throw new Error('Proxy process exited before port became available');
+    }
+    throw err;
+  }
+
+  return proxy;
 }
 
 /**

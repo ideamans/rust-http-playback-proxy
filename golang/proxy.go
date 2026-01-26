@@ -1,13 +1,12 @@
 package httpplaybackproxy
 
 import (
-	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"sync"
 	"time"
@@ -37,16 +36,48 @@ type Proxy struct {
 // RecordingOptions holds options for starting a recording proxy
 type RecordingOptions struct {
 	EntryURL     string     // Optional: Entry URL to start recording from
-	Port         int        // Optional: Port to use (default: 18080, will auto-search)
+	Port         int        // Optional: Port to use (0 = auto-detect)
 	DeviceType   DeviceType // Optional: Device type (default: mobile)
 	InventoryDir string     // Optional: Inventory directory (default: ./inventory)
-	// Note: ControlPort removed - recording uses signal-based shutdown only
 }
 
 // PlaybackOptions holds options for starting a playback proxy
 type PlaybackOptions struct {
 	Port         int
 	InventoryDir string
+}
+
+// getAvailablePort finds an available port by binding to port 0 and releasing it
+func getAvailablePort() (int, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("failed to find available port: %w", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+	return port, nil
+}
+
+// waitForPort waits for a port to become available (accepting connections)
+// Uses TCP connection attempts with exponential backoff
+func waitForPort(port int, timeout time.Duration) error {
+	startTime := time.Now()
+	delay := 50 * time.Millisecond
+
+	for time.Since(startTime) < timeout {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+		if err == nil {
+			conn.Close()
+			return nil // Port is open
+		}
+		time.Sleep(delay)
+		delay = time.Duration(float64(delay) * 1.5)
+		if delay > 500*time.Millisecond {
+			delay = 500 * time.Millisecond
+		}
+	}
+
+	return fmt.Errorf("timeout waiting for port %d to become available", port)
 }
 
 // StartRecording starts a recording proxy
@@ -60,8 +91,24 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 		return nil, err
 	}
 
-	// Note: Defaults are now handled in the args building section above
-	// to match CLI behavior exactly
+	// Get an available port if not specified
+	port := opts.Port
+	if port == 0 {
+		port, err = getAvailablePort()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	deviceType := opts.DeviceType
+	if deviceType == "" {
+		deviceType = DeviceTypeMobile
+	}
+
+	inventoryDir := opts.InventoryDir
+	if inventoryDir == "" {
+		inventoryDir = "./inventory"
+	}
 
 	// Build command
 	ctx, cancel := context.WithCancel(context.Background())
@@ -72,35 +119,17 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 		args = append(args, opts.EntryURL)
 	}
 
-	// Add port option
-	if opts.Port != 0 {
-		args = append(args, "--port", strconv.Itoa(opts.Port))
-	}
+	// Always specify the port explicitly
+	args = append(args, "--port", strconv.Itoa(port))
 
 	// Add device type
-	deviceType := opts.DeviceType
-	if deviceType == "" {
-		deviceType = DeviceTypeMobile
-	}
 	args = append(args, "--device", string(deviceType))
 
 	// Add inventory directory
-	inventoryDir := opts.InventoryDir
-	if inventoryDir == "" {
-		inventoryDir = "./inventory"
-	}
 	args = append(args, "--inventory", inventoryDir)
 
-	// Note: control-port removed from recording mode - uses signal-based shutdown only
-
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-
-	// Capture stdout to extract actual port number
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
+	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	setProcAttributes(cmd)
 
@@ -110,57 +139,26 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 		return nil, fmt.Errorf("failed to start recording proxy: %w", err)
 	}
 
-	// Store the actual values used (after defaults)
-	actualPort := opts.Port
-	if actualPort == 0 {
-		actualPort = 18080 // Default fallback
-	}
-	actualInventoryDir := inventoryDir
-	actualDeviceType := deviceType
-
 	proxy := &Proxy{
 		Mode:         ModeRecording,
-		Port:         actualPort,
-		InventoryDir: actualInventoryDir,
+		Port:         port,
+		InventoryDir: inventoryDir,
 		EntryURL:     opts.EntryURL,
-		DeviceType:   actualDeviceType,
+		DeviceType:   deviceType,
 		cmd:          cmd,
 		ctx:          ctx,
 		cancel:       cancel,
 	}
 
-	// Read stdout to find actual port number and forward output
-	portChan := make(chan int, 1)
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		// Regex that matches both "HTTPS MITM Proxy" and "Playback proxy"
-		portRegex := regexp.MustCompile(`(?:HTTPS MITM |Playback |Recording )?[Pp]roxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)`)
-		portFound := false
-		for scanner.Scan() {
-			line := scanner.Text()
-			fmt.Println(line) // Forward to stdout
-
-			// Extract port number from output
-			if !portFound {
-				if matches := portRegex.FindStringSubmatch(line); len(matches) > 1 {
-					if port, err := strconv.Atoi(matches[1]); err == nil {
-						portChan <- port
-						portFound = true
-					}
-				}
-			}
+	// Wait for the port to become available
+	if err := waitForPort(port, 15*time.Second); err != nil {
+		// Check if process exited early
+		if !proxy.IsRunning() {
+			cancel()
+			return nil, fmt.Errorf("proxy process exited before port became available")
 		}
-		if !portFound {
-			close(portChan) // Signal that no port was found
-		}
-	}()
-
-	// Wait for actual port number (with timeout)
-	select {
-	case port := <-portChan:
-		proxy.Port = port
-	case <-time.After(5 * time.Second):
-		// Timeout - use default port
+		cancel()
+		return nil, err
 	}
 
 	return proxy, nil
@@ -177,11 +175,15 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 		return nil, err
 	}
 
-	// Set defaults to match CLI behavior
+	// Get an available port if not specified
 	port := opts.Port
 	if port == 0 {
-		port = 18080 // Binary will auto-search from this
+		port, err = getAvailablePort()
+		if err != nil {
+			return nil, err
+		}
 	}
+
 	inventoryDir := opts.InventoryDir
 	if inventoryDir == "" {
 		inventoryDir = "./inventory"
@@ -197,20 +199,13 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	args := []string{"playback"}
 
-	if port != 18080 {
-		args = append(args, "--port", strconv.Itoa(port))
-	}
+	// Always specify the port explicitly
+	args = append(args, "--port", strconv.Itoa(port))
 
 	args = append(args, "--inventory", inventoryDir)
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
-
-	// Capture stdout to extract actual port number
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
+	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	setProcAttributes(cmd)
 
@@ -229,38 +224,15 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 		cancel:       cancel,
 	}
 
-	// Read stdout to find actual port number and forward output
-	portChan := make(chan int, 1)
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		// Regex that matches both "HTTPS MITM Proxy" and "Playback proxy"
-		portRegex := regexp.MustCompile(`(?:HTTPS MITM |Playback |Recording )?[Pp]roxy listening on (?:127\.0\.0\.1|0\.0\.0\.0):(\d+)`)
-		portFound := false
-		for scanner.Scan() {
-			line := scanner.Text()
-			fmt.Println(line) // Forward to stdout
-
-			// Extract port number from output
-			if !portFound {
-				if matches := portRegex.FindStringSubmatch(line); len(matches) > 1 {
-					if port, err := strconv.Atoi(matches[1]); err == nil {
-						portChan <- port
-						portFound = true
-					}
-				}
-			}
+	// Wait for the port to become available
+	if err := waitForPort(port, 15*time.Second); err != nil {
+		// Check if process exited early
+		if !proxy.IsRunning() {
+			cancel()
+			return nil, fmt.Errorf("proxy process exited before port became available")
 		}
-		if !portFound {
-			close(portChan) // Signal that no port was found
-		}
-	}()
-
-	// Wait for actual port number (with timeout)
-	select {
-	case port := <-portChan:
-		proxy.Port = port
-	case <-time.After(5 * time.Second):
-		// Timeout - use default port
+		cancel()
+		return nil, err
 	}
 
 	return proxy, nil
