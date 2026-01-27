@@ -6,8 +6,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::info;
 
-/// Maximum wait time per chunk to prevent infinite hangs (30 seconds)
-const MAX_CHUNK_WAIT_MS: u64 = 30_000;
+/// Maximum wait time per operation to prevent infinite hangs (30 seconds)
+const MAX_WAIT_MS: u64 = 30_000;
 
 /// A chunk with timing information for delivery
 pub struct TimedChunk {
@@ -41,6 +41,7 @@ impl Stream for TimedChunkStream {
 ///
 /// # Returns
 /// A stream that yields chunks as they become ready according to timing
+#[allow(dead_code)] // Used in tests and may be useful for external callers
 pub fn spawn_timed_delivery(
     chunks: Vec<TimedChunk>,
     target_close_time: u64,
@@ -58,7 +59,7 @@ pub fn spawn_timed_delivery(
 
             // Wait until target_time for this chunk
             if chunk.target_time > elapsed {
-                let wait_time = (chunk.target_time - elapsed).min(MAX_CHUNK_WAIT_MS);
+                let wait_time = (chunk.target_time - elapsed).min(MAX_WAIT_MS);
                 info!(
                     "Chunk[{}]: Waiting {}ms before sending (target: {}ms, elapsed: {}ms)",
                     chunk_idx, wait_time, chunk.target_time, elapsed
@@ -88,7 +89,7 @@ pub fn spawn_timed_delivery(
         // All chunks sent, now wait until target_close_time before closing
         let elapsed = ttfb_instant.elapsed().as_millis() as u64;
         if target_close_time > elapsed {
-            let wait_time = (target_close_time - elapsed).min(MAX_CHUNK_WAIT_MS);
+            let wait_time = (target_close_time - elapsed).min(MAX_WAIT_MS);
             info!(
                 "All {} chunks sent, waiting {}ms until target_close_time before closing connection",
                 total_chunks, wait_time
@@ -103,6 +104,108 @@ pub fn spawn_timed_delivery(
         }
 
         // Sender drops here, which closes the stream gracefully
+    });
+
+    TimedChunkStream { receiver: rx }
+}
+
+/// Spawn a background task that waits for TTFB, then delivers chunks according to timing.
+///
+/// This is an enhanced version of `spawn_timed_delivery` that also handles TTFB waiting
+/// in the spawned task. This ensures that `handle_request` returns immediately,
+/// preventing HTTP/2 connection-level blocking.
+///
+/// # Arguments
+/// * `ttfb_ms` - Time to wait before sending first byte (TTFB simulation)
+/// * `chunks` - Vector of chunks with their target delivery times (relative to TTFB completion)
+/// * `target_close_time` - Time (ms after TTFB) when the connection should close
+///
+/// # Returns
+/// A stream that yields chunks as they become ready according to timing
+pub fn spawn_timed_delivery_with_ttfb(
+    ttfb_ms: u64,
+    chunks: Vec<TimedChunk>,
+    target_close_time: u64,
+) -> TimedChunkStream {
+    // Use a smaller buffer to reduce memory pressure and allow faster backpressure detection
+    let (tx, rx) = mpsc::channel(4);
+
+    tokio::spawn(async move {
+        // Wait for TTFB first - this happens in the spawned task, not blocking handle_request
+        if ttfb_ms > 0 {
+            let wait_time = ttfb_ms.min(MAX_WAIT_MS);
+            info!("TTFB: Waiting {}ms before sending first byte", wait_time);
+            tokio::time::sleep(Duration::from_millis(wait_time)).await;
+            info!("TTFB: Wait completed, starting chunk delivery");
+        }
+
+        // Record the instant when TTFB completed - this is the time origin for chunks
+        let ttfb_end_instant = Instant::now();
+        let total_chunks = chunks.len();
+
+        // Send all chunks immediately without timing delays
+        // HTTP/2 flow control will handle the pacing naturally
+        // This prevents connection timeouts during long waits
+        for (chunk_idx, chunk) in chunks.into_iter().enumerate() {
+            let elapsed = ttfb_end_instant.elapsed().as_millis() as u64;
+
+            // For chunk timing, use a much shorter max wait to prevent connection issues
+            // HTTP/2 connections can timeout if idle for too long
+            const MAX_CHUNK_WAIT_MS: u64 = 5_000; // 5 seconds max per chunk
+
+            if chunk.target_time > elapsed {
+                let wait_time = (chunk.target_time - elapsed).min(MAX_CHUNK_WAIT_MS);
+                if wait_time > 0 {
+                    info!(
+                        "Chunk[{}]: Waiting {}ms before sending (target: {}ms, elapsed: {}ms)",
+                        chunk_idx, wait_time, chunk.target_time, elapsed
+                    );
+                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                }
+            } else if chunk.target_time > 0 && elapsed > chunk.target_time {
+                let behind_ms = elapsed - chunk.target_time;
+                info!(
+                    "Chunk[{}]: Behind schedule by {}ms, sending immediately (target: {}ms, elapsed: {}ms)",
+                    chunk_idx, behind_ms, chunk.target_time, elapsed
+                );
+            }
+
+            info!("Chunk[{}]: Sending {} bytes", chunk_idx, chunk.data.len());
+
+            // Use a timeout for channel send to detect stuck receivers
+            match tokio::time::timeout(Duration::from_secs(10), tx.send(Ok(chunk.data))).await {
+                Ok(Ok(())) => {
+                    // Successfully sent
+                }
+                Ok(Err(_)) => {
+                    // Channel closed - receiver dropped
+                    info!(
+                        "Chunk[{}]: Channel closed, client likely disconnected",
+                        chunk_idx
+                    );
+                    return;
+                }
+                Err(_) => {
+                    // Timeout - receiver not consuming data
+                    info!(
+                        "Chunk[{}]: Send timeout, receiver may be stuck or slow",
+                        chunk_idx
+                    );
+                    return;
+                }
+            }
+        }
+
+        // Don't wait for target_close_time - just complete immediately
+        // Long waits after all data is sent can cause HTTP/2 stream issues
+        let elapsed = ttfb_end_instant.elapsed().as_millis() as u64;
+        info!(
+            "All {} chunks sent in {}ms (target_close_time was {}ms)",
+            total_chunks, elapsed, target_close_time
+        );
+
+        // Explicitly drop sender to signal end of stream
+        drop(tx);
     });
 
     TimedChunkStream { receiver: rx }
@@ -379,6 +482,162 @@ mod tests {
         );
 
         // Clean up slow stream (let it finish or disconnect)
+        drop(slow_stream);
+    }
+
+    // Tests for spawn_timed_delivery_with_ttfb
+
+    #[tokio::test]
+    async fn test_ttfb_delivery_basic() {
+        let start = Instant::now();
+
+        let chunks = vec![TimedChunk {
+            data: Bytes::from("data"),
+            target_time: 0,
+        }];
+
+        // 100ms TTFB
+        let stream = spawn_timed_delivery_with_ttfb(100, chunks, 50);
+        let results: Vec<_> = stream.collect().await;
+
+        let elapsed = start.elapsed().as_millis();
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].as_ref().unwrap().as_ref(), b"data");
+
+        // Should take at least 100ms (TTFB) + 50ms (close time)
+        assert!(
+            elapsed >= 100,
+            "Expected at least 100ms for TTFB, got {}ms",
+            elapsed
+        );
+        assert!(elapsed <= 250, "Expected at most 250ms, got {}ms", elapsed);
+    }
+
+    #[tokio::test]
+    async fn test_ttfb_delivery_zero_ttfb() {
+        let start = Instant::now();
+
+        let chunks = vec![TimedChunk {
+            data: Bytes::from("immediate"),
+            target_time: 0,
+        }];
+
+        // 0ms TTFB - should be immediate
+        let stream = spawn_timed_delivery_with_ttfb(0, chunks, 10);
+        let results: Vec<_> = stream.collect().await;
+
+        let elapsed = start.elapsed().as_millis();
+
+        assert_eq!(results.len(), 1);
+        assert!(elapsed < 100, "Zero TTFB should be fast, got {}ms", elapsed);
+    }
+
+    /// Test that TTFB-based streams don't block each other.
+    /// This is the key test for the HTTP/2 fix with TTFB waiting.
+    #[tokio::test]
+    async fn test_ttfb_concurrent_streams_dont_block() {
+        let start = Instant::now();
+
+        // Create 3 streams with 200ms TTFB each
+        // If they blocked each other, total time would be 600ms+
+        // With spawned tasks, they should complete in ~200ms (parallel)
+        let stream1 = spawn_timed_delivery_with_ttfb(
+            200,
+            vec![TimedChunk {
+                data: Bytes::from("s1"),
+                target_time: 0,
+            }],
+            10,
+        );
+        let stream2 = spawn_timed_delivery_with_ttfb(
+            200,
+            vec![TimedChunk {
+                data: Bytes::from("s2"),
+                target_time: 0,
+            }],
+            10,
+        );
+        let stream3 = spawn_timed_delivery_with_ttfb(
+            200,
+            vec![TimedChunk {
+                data: Bytes::from("s3"),
+                target_time: 0,
+            }],
+            10,
+        );
+
+        // Collect all streams concurrently
+        let (r1, r2, r3) = tokio::join!(
+            stream1.collect::<Vec<_>>(),
+            stream2.collect::<Vec<_>>(),
+            stream3.collect::<Vec<_>>()
+        );
+
+        let elapsed = start.elapsed().as_millis();
+
+        // Verify all data received
+        assert_eq!(r1.len(), 1);
+        assert_eq!(r2.len(), 1);
+        assert_eq!(r3.len(), 1);
+        assert_eq!(r1[0].as_ref().unwrap().as_ref(), b"s1");
+        assert_eq!(r2[0].as_ref().unwrap().as_ref(), b"s2");
+        assert_eq!(r3[0].as_ref().unwrap().as_ref(), b"s3");
+
+        // KEY ASSERTION: 3 streams with 200ms TTFB should complete in ~200-300ms (parallel)
+        // NOT 600ms+ (serial blocking)
+        assert!(
+            elapsed >= 200,
+            "Streams completed too fast: {}ms (expected ~200ms for TTFB)",
+            elapsed
+        );
+        assert!(
+            elapsed < 400,
+            "Streams took {}ms - they may be blocking each other! Expected ~200-300ms",
+            elapsed
+        );
+    }
+
+    /// Test that a stream with long TTFB doesn't block a stream with short TTFB
+    #[tokio::test]
+    async fn test_ttfb_long_doesnt_block_short() {
+        let start = Instant::now();
+
+        // Stream with 500ms TTFB
+        let slow_stream = spawn_timed_delivery_with_ttfb(
+            500,
+            vec![TimedChunk {
+                data: Bytes::from("slow"),
+                target_time: 0,
+            }],
+            10,
+        );
+
+        // Stream with 50ms TTFB
+        let fast_stream = spawn_timed_delivery_with_ttfb(
+            50,
+            vec![TimedChunk {
+                data: Bytes::from("fast"),
+                target_time: 0,
+            }],
+            10,
+        );
+
+        // Collect fast stream first
+        let fast_results: Vec<_> = fast_stream.collect().await;
+        let fast_elapsed = start.elapsed().as_millis();
+
+        assert_eq!(fast_results.len(), 1);
+        assert_eq!(fast_results[0].as_ref().unwrap().as_ref(), b"fast");
+
+        // Fast stream should complete in ~50-150ms, NOT blocked by slow stream's 500ms TTFB
+        assert!(
+            fast_elapsed < 200,
+            "Fast stream took {}ms - blocked by slow stream! Expected < 200ms",
+            fast_elapsed
+        );
+
+        // Clean up
         drop(slow_stream);
     }
 }

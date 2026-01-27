@@ -5,11 +5,11 @@ use hudsucker::{
 };
 use std::future::Future;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
-use crate::playback::timing_delivery::{TimedChunk, spawn_timed_delivery};
+use crate::playback::timing_delivery::{TimedChunk, spawn_timed_delivery_with_ttfb};
 use crate::types::Transaction;
 
 /// Playback handler for Hudsucker MITM proxy
@@ -191,21 +191,12 @@ async fn serve_transaction(
     transaction: Transaction,
     _start_time: Arc<Instant>,
 ) -> anyhow::Result<Response<Body>> {
-    // Wait for TTFB before sending response headers
-    // This ensures the client measures TTFB accurately
+    // NOTE: TTFB waiting is now handled in the spawned delivery task, not here.
+    // This allows handle_request to return immediately, preventing HTTP/2 connection blocking.
     let ttfb_ms = transaction.ttfb;
-    info!(
-        "Waiting {}ms for TTFB before sending response headers",
-        ttfb_ms
-    );
-    tokio::time::sleep(Duration::from_millis(ttfb_ms)).await;
-    info!("TTFB wait completed, now sending response headers");
-
-    // Record the time after TTFB wait (when we start sending body)
-    // Chunks have target_time relative to this point
-    let ttfb_end_instant = Instant::now();
 
     info!("Serving transaction for URL: {}", transaction.url);
+    info!("  TTFB: {}ms (will be simulated in body stream)", ttfb_ms);
     info!("  Status code: {:?}", transaction.status_code);
     info!("  Number of chunks: {}", transaction.chunks.len());
     info!(
@@ -270,9 +261,7 @@ async fn serve_transaction(
         );
     }
 
-    // Convert chunks to TimedChunks for the new channel-based delivery
-    // This approach solves HTTP/2 blocking: timing waits happen in a spawned task,
-    // not in the body stream producer, so other HTTP/2 streams aren't blocked
+    // Convert chunks to TimedChunks for the channel-based delivery
     let timed_chunks: Vec<TimedChunk> = transaction
         .chunks
         .into_iter()
@@ -284,9 +273,11 @@ async fn serve_transaction(
 
     let target_close_time = transaction.target_close_time;
 
-    // Spawn a background task that delivers chunks according to timing
-    // The returned stream is non-blocking and safe for HTTP/2 multiplexing
-    let stream = spawn_timed_delivery(timed_chunks, target_close_time, ttfb_end_instant);
+    // Spawn a background task that handles TTFB waiting AND chunk delivery.
+    // This solves HTTP/2 blocking: ALL timing waits happen in a spawned task,
+    // not in handle_request, so other HTTP/2 streams aren't blocked.
+    // Note: Response headers are sent immediately, TTFB is simulated by delaying first byte.
+    let stream = spawn_timed_delivery_with_ttfb(ttfb_ms, timed_chunks, target_close_time);
 
     // Body::from_stream expects Stream<Item = Result<impl Into<Bytes>, impl Error>>
     // Our stream already yields Result<Bytes, std::io::Error> which satisfies this
