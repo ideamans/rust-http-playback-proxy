@@ -1551,8 +1551,6 @@ dependencies = [
 [[package]]
 name = "ideamans-hudsucker"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9d25ef3fab04b7a7699d7a4ede32a92d77e1e9e2f74d56511a1ede45da13ad3"
 dependencies = [
  "async-compression",
  "bstr",

@@ -1,0 +1,3 @@
+[submodule "hudsucker"]
+	path = hudsucker
+	url = git@github.com:ideamans/hudsucker.git
