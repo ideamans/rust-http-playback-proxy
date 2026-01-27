@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use http_body_util::StreamBody;
 use hudsucker::{
     Body, HttpContext, HttpHandler, RequestOrResponse,
     hyper::{Request, Response, StatusCode},
@@ -10,9 +9,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 use tracing::{error, info};
 
+use crate::playback::timing_delivery::{TimedChunk, spawn_timed_delivery};
 use crate::types::Transaction;
-use futures::stream;
-use hyper::body::Frame;
 
 /// Playback handler for Hudsucker MITM proxy
 #[derive(Clone)]
@@ -272,98 +270,27 @@ async fn serve_transaction(
         );
     }
 
-    // Create streaming body with timing control
-    // Chunks have target_time as relative time from TTFB completion (0-based)
-    // After all chunks are sent, wait until target_close_time before closing the connection
-    let chunks = transaction.chunks.clone();
+    // Convert chunks to TimedChunks for the new channel-based delivery
+    // This approach solves HTTP/2 blocking: timing waits happen in a spawned task,
+    // not in the body stream producer, so other HTTP/2 streams aren't blocked
+    let timed_chunks: Vec<TimedChunk> = transaction
+        .chunks
+        .into_iter()
+        .map(|c| TimedChunk {
+            data: Bytes::from(c.chunk),
+            target_time: c.target_time,
+        })
+        .collect();
+
     let target_close_time = transaction.target_close_time;
-    let total_chunks = chunks.len();
 
-    let stream = stream::unfold(
-        (
-            chunks.into_iter().peekable(),
-            ttfb_end_instant,
-            target_close_time,
-            total_chunks,
-            0usize,
-            false,
-        ),
-        |(mut iter, ttfb_instant, close_time, total, chunk_idx, sent_all)| async move {
-            if sent_all {
-                // All chunks have been sent, now wait until target_close_time before closing
-                let elapsed = ttfb_instant.elapsed().as_millis() as u64;
-                if close_time > elapsed {
-                    let wait_time = close_time - elapsed;
-                    info!(
-                        "All {} chunks sent, waiting {}ms until target_close_time before closing connection",
-                        total, wait_time
-                    );
-                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
-                } else {
-                    let behind_ms = elapsed - close_time;
-                    info!(
-                        "All {} chunks sent, already {}ms past target_close_time, closing immediately",
-                        total, behind_ms
-                    );
-                }
-                // Stream ends here - connection will close
-                return None;
-            }
+    // Spawn a background task that delivers chunks according to timing
+    // The returned stream is non-blocking and safe for HTTP/2 multiplexing
+    let stream = spawn_timed_delivery(timed_chunks, target_close_time, ttfb_end_instant);
 
-            if let Some(chunk) = iter.next() {
-                // Check current elapsed time since TTFB completion
-                let elapsed = ttfb_instant.elapsed().as_millis() as u64;
-
-                // Wait until target_time for this chunk
-                if chunk.target_time > elapsed {
-                    let wait_time = chunk.target_time - elapsed;
-                    info!(
-                        "Chunk[{}]: Waiting {}ms before sending (target: {}ms, elapsed: {}ms)",
-                        chunk_idx, wait_time, chunk.target_time, elapsed
-                    );
-                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
-                } else if chunk.target_time > 0 && elapsed > chunk.target_time {
-                    // We're behind schedule - log it but send immediately
-                    let behind_ms = elapsed - chunk.target_time;
-                    info!(
-                        "Chunk[{}]: Behind schedule by {}ms, sending immediately (target: {}ms, elapsed: {}ms)",
-                        chunk_idx, behind_ms, chunk.target_time, elapsed
-                    );
-                }
-
-                // Send chunk
-                info!("Chunk[{}]: Sending {} bytes", chunk_idx, chunk.chunk.len());
-                let frame = Frame::data(Bytes::from(chunk.chunk));
-
-                // Check if this was the last chunk
-                let is_last = iter.peek().is_none();
-
-                Some((
-                    Ok::<_, std::io::Error>(frame),
-                    (
-                        iter,
-                        ttfb_instant,
-                        close_time,
-                        total,
-                        chunk_idx + 1,
-                        is_last,
-                    ),
-                ))
-            } else {
-                // Shouldn't reach here but handle gracefully
-                None
-            }
-        },
-    );
-
-    let stream_body = StreamBody::new(stream);
-
-    // Convert to Hudsucker's Body type using from_stream
-    // Map the stream to extract bytes from frames
-    use futures::TryStreamExt;
-    let bytes_stream = stream_body.map_ok(|frame| frame.into_data().unwrap_or_default());
-
-    let body = Body::from_stream(bytes_stream);
+    // Body::from_stream expects Stream<Item = Result<impl Into<Bytes>, impl Error>>
+    // Our stream already yields Result<Bytes, std::io::Error> which satisfies this
+    let body = Body::from_stream(stream);
 
     let response = response_builder.body(body)?;
 

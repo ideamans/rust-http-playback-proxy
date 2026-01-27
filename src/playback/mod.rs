@@ -9,6 +9,7 @@ mod hudsucker_handler;
 mod proxy;
 mod signal_handler;
 mod tests;
+mod timing_delivery;
 mod transaction;
 
 #[cfg(test)]
