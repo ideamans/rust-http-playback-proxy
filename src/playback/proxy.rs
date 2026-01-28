@@ -1,10 +1,11 @@
 use anyhow::Result;
 use tracing::{error, info};
 
+use crate::ghost_server::GhostServerPool;
 use crate::traits::FileSystem;
 use crate::types::Transaction;
 
-use super::hudsucker_handler::PlaybackHandler;
+use super::ghost_forwarder::GhostForwarder;
 use hudsucker::{
     Proxy as HudsuckerProxy,
     certificate_authority::RcgenAuthority,
@@ -16,7 +17,19 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     port: u16,
     transactions: Vec<Transaction>,
 ) -> Result<()> {
-    info!("Starting HTTPS MITM playback proxy on port {}", port);
+    info!("Starting playback mode with Ghost Server Pool architecture");
+
+    // Phase 1: Start Ghost Server Pool (one server per domain)
+    let ghost_pool = GhostServerPool::start(transactions).await?;
+    let routing_table = ghost_pool.get_routing_table();
+
+    info!(
+        "Ghost Server Pool started with {} servers",
+        routing_table.len()
+    );
+
+    // Phase 2: Start MITM proxy that forwards to Ghost Servers
+    info!("Starting HTTPS MITM proxy on port {}", port);
 
     // Generate a self-signed CA certificate for MITM
     let key_pair = KeyPair::generate()?;
@@ -38,8 +51,8 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
 
     let ca = RcgenAuthority::new(issuer, 1_000, aws_lc_rs::default_provider());
 
-    // Create the playback handler
-    let handler = PlaybackHandler::new(transactions);
+    // Create the forwarding handler with routing table
+    let handler = GhostForwarder::new(routing_table);
 
     // Build the proxy with standard TLS configuration
     let crypto_provider = aws_lc_rs::default_provider();
@@ -77,15 +90,16 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     // Signal received, stop accepting new connections
     info!("Shutdown signal received, stopping playback proxy");
 
-    // Note: Hudsucker proxy doesn't provide graceful shutdown mechanism
-    // We rely on the process termination to stop accepting connections
+    // Abort proxy task first
+    proxy_task.abort();
+
     // Give in-flight requests a moment to complete
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Stop Ghost Server Pool
+    ghost_pool.stop().await;
 
     info!("Playback proxy stopped");
-
-    // Abort proxy task
-    proxy_task.abort();
 
     Ok(())
 }
