@@ -89,10 +89,8 @@ impl GhostServerPool {
 
                 // Use HTTP/2 if any resource from this origin used HTTP/2
                 // (conservative: if mixed, prefer HTTP/2)
-                if let Some(version) = get_http_version_from_transaction(&tx) {
-                    if version == HttpVersion::Http2 {
-                        entry.1 = HttpVersion::Http2;
-                    }
+                if get_http_version_from_transaction(&tx) == Some(HttpVersion::Http2) {
+                    entry.1 = HttpVersion::Http2;
                 }
 
                 entry.0.push(tx);
@@ -381,13 +379,13 @@ async fn handle_http_connection(
         async move { handle_request(req, state).await }
     });
 
-    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-        if !err.is_incomplete_message() {
-            error!(
-                "Error serving HTTP connection from {}: {:?}",
-                remote_addr, err
-            );
-        }
+    if let Err(err) = http1::Builder::new().serve_connection(io, service).await
+        && !err.is_incomplete_message()
+    {
+        error!(
+            "Error serving HTTP connection from {}: {:?}",
+            remote_addr, err
+        );
     }
 }
 
@@ -406,13 +404,13 @@ async fn handle_tls_connection(
 
     // For now, always use HTTP/1.1
     // TODO: Add HTTP/2 support with hyper::server::conn::http2
-    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
-        if !err.is_incomplete_message() {
-            error!(
-                "Error serving HTTPS connection from {}: {:?}",
-                remote_addr, err
-            );
-        }
+    if let Err(err) = http1::Builder::new().serve_connection(io, service).await
+        && !err.is_incomplete_message()
+    {
+        error!(
+            "Error serving HTTPS connection from {}: {:?}",
+            remote_addr, err
+        );
     }
 }
 
