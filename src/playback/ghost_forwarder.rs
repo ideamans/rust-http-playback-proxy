@@ -2,29 +2,37 @@
 //!
 //! A simple HTTP handler that forwards requests to the Ghost Server
 //! while preserving the Host header for virtual host matching.
+//! Uses hyper directly instead of reqwest to preserve streaming timing.
 
+use bytes::Bytes;
+use futures::TryStreamExt;
+use http_body_util::Empty;
 use hudsucker::{
     Body, HttpContext, HttpHandler, RequestOrResponse,
     hyper::{Request, Response, StatusCode},
+};
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::TokioExecutor,
 };
 use std::future::Future;
 use tracing::{error, info};
 
 /// Simple forwarding handler that sends all requests to Ghost Server
+/// Uses hyper directly for minimal buffering to preserve timing
 #[derive(Clone)]
 pub struct GhostForwarder {
     /// Ghost Server port
     ghost_port: u16,
-    /// HTTP client for forwarding
-    client: reqwest::Client,
+    /// Hyper client for forwarding (minimal buffering)
+    client: Client<HttpConnector, Empty<Bytes>>,
 }
 
 impl GhostForwarder {
     pub fn new(ghost_port: u16) -> Self {
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .build()
-            .expect("Failed to create HTTP client");
+        let connector = HttpConnector::new();
+        // Use HTTP/1.1 only for Ghost Server (localhost)
+        let client = Client::builder(TokioExecutor::new()).build(connector);
 
         Self { ghost_port, client }
     }
@@ -92,26 +100,13 @@ impl HttpHandler for GhostForwarder {
                 method, path_and_query, host
             );
 
-            // Build the forwarding URL to Ghost Server
-            let ghost_url = format!("http://127.0.0.1:{}{}", ghost_port, path_and_query);
+            // Build the forwarding URI to Ghost Server
+            let ghost_uri = format!("http://127.0.0.1:{}{}", ghost_port, path_and_query)
+                .parse::<hyper::Uri>()
+                .expect("Failed to parse Ghost Server URI");
 
-            // Forward the request to Ghost Server
-            let mut request_builder = match method.as_str() {
-                "GET" => client.get(&ghost_url),
-                "POST" => client.post(&ghost_url),
-                "PUT" => client.put(&ghost_url),
-                "DELETE" => client.delete(&ghost_url),
-                "HEAD" => client.head(&ghost_url),
-                "PATCH" => client.patch(&ghost_url),
-                _ => {
-                    error!("Unsupported HTTP method: {}", method);
-                    let response = Response::builder()
-                        .status(StatusCode::METHOD_NOT_ALLOWED)
-                        .body(Body::from(format!("Unsupported method: {}", method)))
-                        .unwrap();
-                    return RequestOrResponse::Response(response);
-                }
-            };
+            // Build hyper request
+            let mut request_builder = Request::builder().method(method.clone()).uri(ghost_uri);
 
             // Forward essential headers (skip Host/:authority - we'll set X-Original-Host)
             for (name, value) in headers.iter() {
@@ -135,26 +130,35 @@ impl HttpHandler for GhostForwarder {
                     continue;
                 }
 
-                if let Ok(value_str) = value.to_str() {
-                    request_builder = request_builder.header(name.as_str(), value_str);
-                }
+                request_builder = request_builder.header(name.clone(), value.clone());
             }
 
             // Send original host as X-Original-Host custom header
-            // reqwest may override the Host header based on URL, so we use a custom header
-            // that Ghost Server will check for virtual host matching
-            request_builder = request_builder.header("X-Original-Host", host);
+            request_builder = request_builder.header("X-Original-Host", &host);
+
+            // Build request with empty body (we only support GET/HEAD in playback)
+            let ghost_request = match request_builder.body(Empty::<Bytes>::new()) {
+                Ok(req) => req,
+                Err(e) => {
+                    error!("Failed to build request: {}", e);
+                    let error_response = Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from(format!("Request build error: {}", e)))
+                        .unwrap();
+                    return RequestOrResponse::Response(error_response);
+                }
+            };
 
             // Execute the request to Ghost Server
-            match request_builder.send().await {
+            match client.request(ghost_request).await {
                 Ok(ghost_response) => {
-                    // Convert reqwest response to hyper response
+                    // Convert hyper response to hudsucker response
                     let status = ghost_response.status();
                     let headers = ghost_response.headers().clone();
 
                     info!("Ghost Server responded with status: {}", status);
 
-                    // Build hyper response
+                    // Build response
                     let mut response_builder = Response::builder().status(status.as_u16());
 
                     // Copy response headers
@@ -169,19 +173,16 @@ impl HttpHandler for GhostForwarder {
                             continue;
                         }
 
-                        if let Ok(header_name) =
-                            hyper::header::HeaderName::from_bytes(name.as_str().as_bytes())
-                        {
-                            response_builder = response_builder.header(header_name, value.clone());
-                        }
+                        response_builder = response_builder.header(name.clone(), value.clone());
                     }
 
-                    // Stream the body from Ghost Server
-                    // Map reqwest errors to io::Error for compatibility with Body::from_stream
-                    use futures::TryStreamExt;
+                    // Stream the body from Ghost Server directly
+                    // Convert hyper Incoming to a stream of bytes
+                    use http_body_util::BodyExt;
                     let body_stream = ghost_response
-                        .bytes_stream()
-                        .map_err(|e| std::io::Error::other(format!("reqwest stream error: {}", e)));
+                        .into_body()
+                        .into_data_stream()
+                        .map_err(|e| std::io::Error::other(format!("hyper stream error: {}", e)));
                     let body = Body::from_stream(body_stream);
 
                     match response_builder.body(body) {
