@@ -1,7 +1,8 @@
-//! Ghost Server Pool - Multiple HTTPS servers per domain
+//! Ghost Server Pool - Multiple HTTP/HTTPS servers per domain
 //!
-//! Manages multiple Ghost HTTPS servers, one per unique (scheme, host) combination.
-//! This provides realistic TLS handshake simulation for each domain.
+//! Manages multiple Ghost servers, one per unique (scheme, host) combination.
+//! - HTTPS origins get HTTPS Ghost Servers (with TLS handshake simulation)
+//! - HTTP origins get plain HTTP Ghost Servers
 
 use crate::types::{HttpVersion, Transaction};
 use anyhow::Result;
@@ -36,6 +37,11 @@ impl OriginKey {
         let host = parsed.host_str()?.to_string();
         Some(Self { scheme, host })
     }
+
+    /// Returns true if this origin uses HTTPS
+    pub fn is_https(&self) -> bool {
+        self.scheme == "https"
+    }
 }
 
 /// Information about a running Ghost Server for a specific origin
@@ -48,7 +54,14 @@ pub struct OriginServer {
     pub server_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
-/// Pool of Ghost HTTPS servers, one per origin
+/// Routing entry with scheme information
+#[derive(Debug, Clone)]
+pub struct RoutingEntry {
+    pub port: u16,
+    pub is_https: bool,
+}
+
+/// Pool of Ghost servers, one per origin (scheme + host)
 pub struct GhostServerPool {
     /// Map from origin to server info
     servers: HashMap<OriginKey, OriginServer>,
@@ -87,9 +100,12 @@ impl GhostServerPool {
         }
 
         let origin_count = origin_transactions.len();
+        let https_count = origin_transactions.keys().filter(|o| o.is_https()).count();
+        let http_count = origin_count - https_count;
+
         info!(
-            "Starting {} Ghost Servers for unique origins...",
-            origin_count
+            "Starting {} Ghost Servers ({} HTTPS, {} HTTP)...",
+            origin_count, https_count, http_count
         );
 
         // Start servers in parallel
@@ -132,7 +148,11 @@ impl GhostServerPool {
 
         // Log the mapping
         for (origin, port) in &origin_to_port {
-            info!("  {}://{} -> port {}", origin.scheme, origin.host, port);
+            let protocol_type = if origin.is_https() { "HTTPS" } else { "HTTP" };
+            info!(
+                "  {}://{} -> port {} ({})",
+                origin.scheme, origin.host, port, protocol_type
+            );
         }
 
         Ok(Self {
@@ -146,30 +166,19 @@ impl GhostServerPool {
         self.origin_to_port.get(origin).copied()
     }
 
-    /// Get the port for a given host (tries both https and http)
-    pub fn get_port_for_host(&self, host: &str) -> Option<u16> {
-        // Try HTTPS first (most common)
-        let https_origin = OriginKey {
-            scheme: "https".to_string(),
-            host: host.to_string(),
-        };
-        if let Some(port) = self.origin_to_port.get(&https_origin) {
-            return Some(*port);
-        }
-
-        // Try HTTP
-        let http_origin = OriginKey {
-            scheme: "http".to_string(),
-            host: host.to_string(),
-        };
-        self.origin_to_port.get(&http_origin).copied()
-    }
-
-    /// Get the origin-to-port mapping (for GhostForwarder)
-    pub fn get_routing_table(&self) -> HashMap<String, u16> {
+    /// Get the full routing table with scheme information (for GhostForwarder)
+    /// Key format: "scheme://host" (e.g., "https://example.com")
+    pub fn get_routing_table(&self) -> HashMap<String, RoutingEntry> {
         self.origin_to_port
             .iter()
-            .map(|(origin, port)| (origin.host.clone(), *port))
+            .map(|(origin, port)| {
+                let key = format!("{}://{}", origin.scheme, origin.host);
+                let entry = RoutingEntry {
+                    port: *port,
+                    is_https: origin.is_https(),
+                };
+                (key, entry)
+            })
             .collect()
     }
 
@@ -208,7 +217,7 @@ impl GhostServerPool {
     }
 }
 
-/// Start a Ghost HTTPS Server for a specific origin
+/// Start a Ghost Server for a specific origin (HTTP or HTTPS based on scheme)
 async fn start_origin_server(
     origin: OriginKey,
     transactions: Vec<Transaction>,
@@ -219,13 +228,11 @@ async fn start_origin_server(
     let addr = listener.local_addr()?;
     let port = addr.port();
 
+    let protocol_type = if origin.is_https() { "HTTPS" } else { "HTTP" };
     info!(
-        "Starting Ghost Server for {}://{} on port {} ({:?})",
-        origin.scheme, origin.host, port, http_version
+        "Starting {} Ghost Server for {}://{} on port {} ({:?})",
+        protocol_type, origin.scheme, origin.host, port, http_version
     );
-
-    // Generate TLS certificate for this domain
-    let tls_acceptor = create_tls_acceptor(&origin.host)?;
 
     // Create shutdown channel
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
@@ -236,14 +243,21 @@ async fn start_origin_server(
         start_time: Instant::now(),
     });
 
-    // Spawn server task
-    let server_handle = tokio::spawn(run_https_server(
-        listener,
-        tls_acceptor,
-        state,
-        shutdown_rx,
-        http_version,
-    ));
+    // Spawn server task based on scheme
+    let server_handle = if origin.is_https() {
+        // HTTPS server with TLS
+        let tls_acceptor = create_tls_acceptor(&origin.host)?;
+        tokio::spawn(run_https_server(
+            listener,
+            tls_acceptor,
+            state,
+            shutdown_rx,
+            http_version,
+        ))
+    } else {
+        // Plain HTTP server
+        tokio::spawn(run_http_server(listener, state, shutdown_rx, http_version))
+    };
 
     Ok(OriginServer {
         origin,
@@ -281,7 +295,38 @@ fn create_tls_acceptor(domain: &str) -> Result<TlsAcceptor> {
     Ok(TlsAcceptor::from(Arc::new(config)))
 }
 
-/// Run the HTTPS server loop
+/// Run a plain HTTP server loop (for http:// origins)
+async fn run_http_server(
+    listener: TcpListener,
+    state: Arc<GhostServerState>,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
+    _http_version: HttpVersion,
+) {
+    loop {
+        tokio::select! {
+            result = listener.accept() => {
+                match result {
+                    Ok((stream, remote_addr)) => {
+                        let state = state.clone();
+
+                        tokio::spawn(async move {
+                            handle_http_connection(stream, remote_addr, state).await;
+                        });
+                    }
+                    Err(e) => {
+                        error!("Failed to accept HTTP connection: {}", e);
+                    }
+                }
+            }
+
+            _ = &mut shutdown_rx => {
+                break;
+            }
+        }
+    }
+}
+
+/// Run an HTTPS server loop (for https:// origins)
 async fn run_https_server(
     listener: TcpListener,
     tls_acceptor: TlsAcceptor,
@@ -311,7 +356,7 @@ async fn run_https_server(
                         });
                     }
                     Err(e) => {
-                        error!("Failed to accept connection: {}", e);
+                        error!("Failed to accept HTTPS connection: {}", e);
                     }
                 }
             }
@@ -323,7 +368,30 @@ async fn run_https_server(
     }
 }
 
-/// Handle a single TLS connection
+/// Handle a plain HTTP connection
+async fn handle_http_connection(
+    stream: tokio::net::TcpStream,
+    remote_addr: SocketAddr,
+    state: Arc<GhostServerState>,
+) {
+    let io = TokioIo::new(stream);
+
+    let service = service_fn(move |req| {
+        let state = state.clone();
+        async move { handle_request(req, state).await }
+    });
+
+    if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
+        if !err.is_incomplete_message() {
+            error!(
+                "Error serving HTTP connection from {}: {:?}",
+                remote_addr, err
+            );
+        }
+    }
+}
+
+/// Handle a TLS connection (HTTPS)
 async fn handle_tls_connection(
     stream: tokio_rustls::server::TlsStream<tokio::net::TcpStream>,
     remote_addr: SocketAddr,
@@ -341,7 +409,7 @@ async fn handle_tls_connection(
     if let Err(err) = http1::Builder::new().serve_connection(io, service).await {
         if !err.is_incomplete_message() {
             error!(
-                "Error serving TLS connection from {}: {:?}",
+                "Error serving HTTPS connection from {}: {:?}",
                 remote_addr, err
             );
         }

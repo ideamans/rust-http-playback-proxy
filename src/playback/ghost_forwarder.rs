@@ -1,7 +1,8 @@
 //! Ghost Server Forwarding Handler
 //!
-//! Forwards requests to the appropriate Ghost HTTPS Server based on host.
-//! Each domain has its own Ghost Server, providing realistic TLS handshake simulation.
+//! Forwards requests to the appropriate Ghost Server based on host and scheme.
+//! - HTTPS origins are forwarded via HTTPS to HTTPS Ghost Servers
+//! - HTTP origins are forwarded via HTTP to HTTP Ghost Servers
 
 use bytes::Bytes;
 use futures::TryStreamExt;
@@ -11,7 +12,10 @@ use hudsucker::{
     hyper::{Request, Response, StatusCode},
 };
 use hyper_rustls::HttpsConnectorBuilder;
-use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+use hyper_util::{
+    client::legacy::{Client, connect::HttpConnector},
+    rt::TokioExecutor,
+};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
@@ -19,6 +23,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use tracing::{error, info, warn};
+
+use crate::ghost_server::pool::RoutingEntry;
 
 /// Custom certificate verifier that accepts all certificates (for self-signed Ghost Server certs)
 #[derive(Debug)]
@@ -70,25 +76,22 @@ impl ServerCertVerifier for AcceptAllCertVerifier {
     }
 }
 
-/// Forwarding handler that routes requests to domain-specific Ghost HTTPS Servers
+/// Forwarding handler that routes requests to appropriate Ghost Servers (HTTP or HTTPS)
 #[derive(Clone)]
 pub struct GhostForwarder {
-    /// Routing table: host -> port
-    routing_table: Arc<HashMap<String, u16>>,
-    /// Fallback port (for unknown hosts)
-    fallback_port: Option<u16>,
+    /// Routing table: "scheme://host" -> RoutingEntry
+    routing_table: Arc<HashMap<String, RoutingEntry>>,
     /// HTTPS client (accepts self-signed certs)
-    client: Client<
+    https_client: Client<
         hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
         Empty<Bytes>,
     >,
+    /// HTTP client (plain, no TLS)
+    http_client: Client<HttpConnector, Empty<Bytes>>,
 }
 
 impl GhostForwarder {
-    pub fn new(routing_table: HashMap<String, u16>) -> Self {
-        // Find a fallback port (use the first one if available)
-        let fallback_port = routing_table.values().next().copied();
-
+    pub fn new(routing_table: HashMap<String, RoutingEntry>) -> Self {
         // Create rustls config that accepts self-signed certificates
         let tls_config = rustls::ClientConfig::builder()
             .dangerous()
@@ -102,35 +105,16 @@ impl GhostForwarder {
             .enable_http1()
             .build();
 
-        let client = Client::builder(TokioExecutor::new()).build(https_connector);
+        let https_client = Client::builder(TokioExecutor::new()).build(https_connector);
+
+        // Create plain HTTP connector
+        let http_connector = HttpConnector::new();
+        let http_client = Client::builder(TokioExecutor::new()).build(http_connector);
 
         Self {
             routing_table: Arc::new(routing_table),
-            fallback_port,
-            client,
-        }
-    }
-
-    /// For backward compatibility - single Ghost Server
-    #[allow(dead_code)]
-    pub fn new_single(ghost_port: u16) -> Self {
-        let routing_table = HashMap::new();
-        // Empty routing table with fallback
-        Self {
-            routing_table: Arc::new(routing_table),
-            fallback_port: Some(ghost_port),
-            client: {
-                let tls_config = rustls::ClientConfig::builder()
-                    .dangerous()
-                    .with_custom_certificate_verifier(Arc::new(AcceptAllCertVerifier))
-                    .with_no_client_auth();
-                let https_connector = HttpsConnectorBuilder::new()
-                    .with_tls_config(tls_config)
-                    .https_or_http()
-                    .enable_http1()
-                    .build();
-                Client::builder(TokioExecutor::new()).build(https_connector)
-            },
+            https_client,
+            http_client,
         }
     }
 }
@@ -142,8 +126,8 @@ impl HttpHandler for GhostForwarder {
         req: Request<Body>,
     ) -> impl Future<Output = RequestOrResponse> + Send {
         let routing_table = self.routing_table.clone();
-        let fallback_port = self.fallback_port;
-        let client = self.client.clone();
+        let https_client = self.https_client.clone();
+        let http_client = self.http_client.clone();
 
         async move {
             let method = req.method().clone();
@@ -186,37 +170,53 @@ impl HttpHandler for GhostForwarder {
                 return RequestOrResponse::Response(error_response);
             };
 
-            // Look up the Ghost Server port for this host
-            let ghost_port = routing_table
-                .get(&host)
-                .copied()
-                .or(fallback_port)
-                .unwrap_or_else(|| {
-                    warn!("No Ghost Server for host: {}, using first available", host);
-                    routing_table.values().next().copied().unwrap_or(0)
-                });
+            // Determine scheme from URI (HTTPS by default for proxied requests)
+            let scheme = uri.scheme_str().unwrap_or("https");
 
-            if ghost_port == 0 {
-                error!("No Ghost Server available for host: {}", host);
-                let error_response = Response::builder()
-                    .status(StatusCode::BAD_GATEWAY)
-                    .body(Body::from(format!("No Ghost Server for host: {}", host)))
-                    .unwrap();
-                return RequestOrResponse::Response(error_response);
-            }
+            // Look up the Ghost Server for this origin
+            let routing_key = format!("{}://{}", scheme, host);
+            let routing_entry = routing_table.get(&routing_key).cloned();
+
+            let (ghost_port, use_https) = match routing_entry {
+                Some(entry) => (entry.port, entry.is_https),
+                None => {
+                    // Try the opposite scheme as fallback
+                    let alt_scheme = if scheme == "https" { "http" } else { "https" };
+                    let alt_key = format!("{}://{}", alt_scheme, host);
+
+                    if let Some(entry) = routing_table.get(&alt_key) {
+                        warn!(
+                            "No Ghost Server for {}, using {} instead",
+                            routing_key, alt_key
+                        );
+                        (entry.port, entry.is_https)
+                    } else {
+                        error!("No Ghost Server available for host: {}", host);
+                        let error_response = Response::builder()
+                            .status(StatusCode::BAD_GATEWAY)
+                            .body(Body::from(format!("No Ghost Server for: {}", routing_key)))
+                            .unwrap();
+                        return RequestOrResponse::Response(error_response);
+                    }
+                }
+            };
 
             let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+            let protocol = if use_https { "HTTPS" } else { "HTTP" };
 
             info!(
-                "Forwarding to Ghost Server: {} {} (Host: {} -> port {})",
-                method, path_and_query, host, ghost_port
+                "Forwarding to {} Ghost Server: {} {} (Host: {} -> port {})",
+                protocol, method, path_and_query, host, ghost_port
             );
 
-            // Build the forwarding URI to Ghost HTTPS Server
-            // Use HTTPS to trigger TLS handshake
-            let ghost_uri = format!("https://127.0.0.1:{}{}", ghost_port, path_and_query)
-                .parse::<hyper::Uri>()
-                .expect("Failed to parse Ghost Server URI");
+            // Build the forwarding URI
+            let ghost_scheme = if use_https { "https" } else { "http" };
+            let ghost_uri = format!(
+                "{}://127.0.0.1:{}{}",
+                ghost_scheme, ghost_port, path_and_query
+            )
+            .parse::<hyper::Uri>()
+            .expect("Failed to parse Ghost Server URI");
 
             // Build hyper request
             let mut request_builder = Request::builder().method(method.clone()).uri(ghost_uri);
@@ -261,8 +261,14 @@ impl HttpHandler for GhostForwarder {
                 }
             };
 
-            // Execute the request to Ghost HTTPS Server
-            match client.request(ghost_request).await {
+            // Execute the request to Ghost Server (HTTPS or HTTP)
+            let result = if use_https {
+                https_client.request(ghost_request).await
+            } else {
+                http_client.request(ghost_request).await
+            };
+
+            match result {
                 Ok(ghost_response) => {
                     let status = ghost_response.status();
                     let headers = ghost_response.headers().clone();
