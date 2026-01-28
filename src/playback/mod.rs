@@ -5,11 +5,11 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-mod hudsucker_handler;
+mod ghost_forwarder;
 mod proxy;
 mod signal_handler;
 mod tests;
-mod transaction;
+pub mod transaction;
 
 #[cfg(test)]
 mod transaction_tests;

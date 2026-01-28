@@ -1,4 +1,5 @@
 use clap::ValueEnum;
+use hyper::Version;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -44,6 +45,46 @@ impl HeaderValue {
 
 pub type HttpHeaders = HashMap<String, HeaderValue>;
 
+/// HTTP protocol version
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum HttpVersion {
+    #[serde(rename = "HTTP/0.9")]
+    Http09,
+    #[serde(rename = "HTTP/1.0")]
+    Http10,
+    #[serde(rename = "HTTP/1.1")]
+    Http11,
+    #[serde(rename = "HTTP/2")]
+    Http2,
+    #[serde(rename = "HTTP/3")]
+    Http3,
+}
+
+impl From<Version> for HttpVersion {
+    fn from(v: Version) -> Self {
+        match v {
+            Version::HTTP_09 => HttpVersion::Http09,
+            Version::HTTP_10 => HttpVersion::Http10,
+            Version::HTTP_11 => HttpVersion::Http11,
+            Version::HTTP_2 => HttpVersion::Http2,
+            Version::HTTP_3 => HttpVersion::Http3,
+            _ => HttpVersion::Http11, // Default fallback
+        }
+    }
+}
+
+impl From<HttpVersion> for Version {
+    fn from(v: HttpVersion) -> Self {
+        match v {
+            HttpVersion::Http09 => Version::HTTP_09,
+            HttpVersion::Http10 => Version::HTTP_10,
+            HttpVersion::Http11 => Version::HTTP_11,
+            HttpVersion::Http2 => Version::HTTP_2,
+            HttpVersion::Http3 => Version::HTTP_3,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentEncodingType {
@@ -75,6 +116,8 @@ pub struct Resource {
     pub method: String,
     pub url: String,
     pub ttfb_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_version: Option<HttpVersion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -150,6 +193,7 @@ impl Resource {
             method,
             url,
             ttfb_ms: 0,
+            http_version: None,
             duration_ms: None,
             mbps: None,
             status_code: None,

@@ -149,11 +149,12 @@ impl HttpHandler for RecordingHandler {
 
         async move {
             let headers = res.headers().clone();
+            let http_version = res.version();
 
             // Record TTFB (time to first byte)
             let ttfb_instant = Instant::now();
 
-            info!("Recording response: {}", status);
+            info!("Recording response: {} ({:?})", status, http_version);
 
             // Build request key from HttpContext (available in ideamans-hudsucker 0.25+)
             // This allows accurate request-response correlation even with HTTP/2 multiplexing
@@ -225,6 +226,7 @@ impl HttpHandler for RecordingHandler {
             // Create resource with minimal processing
             let mut resource = Resource::new(method_str, url_for_resource);
             resource.status_code = Some(status.as_u16());
+            resource.http_version = Some(http_version.into());
             resource.ttfb_ms = ttfb_ms;
             resource.duration_ms = Some(duration_ms);
 
