@@ -5,6 +5,7 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(name = "http-playback-proxy")]
 #[command(about = "HTTP playback proxy for recording and replaying HTTP traffic")]
+#[command(version)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

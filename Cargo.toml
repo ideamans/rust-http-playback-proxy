@@ -1,6 +1,6 @@
 [package]
 name = "http-playback-proxy"
-version = "0.1.0"
+version = "0.5.1"
 edition = "2024"
 license = "MIT"
 authors = ["Kunihiko Miyanaga <miyanaga@ideamans.com>"]
