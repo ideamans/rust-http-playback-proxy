@@ -1,10 +1,11 @@
 use anyhow::Result;
 use tracing::{error, info};
 
+use crate::ghost_server::GhostServer;
 use crate::traits::FileSystem;
 use crate::types::Transaction;
 
-use super::hudsucker_handler::PlaybackHandler;
+use super::ghost_forwarder::GhostForwarder;
 use hudsucker::{
     Proxy as HudsuckerProxy,
     certificate_authority::RcgenAuthority,
@@ -16,7 +17,15 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     port: u16,
     transactions: Vec<Transaction>,
 ) -> Result<()> {
-    info!("Starting HTTPS MITM playback proxy on port {}", port);
+    info!("Starting playback mode with Ghost Server architecture");
+
+    // Phase 1: Start Ghost Server on a random port
+    let ghost_server = GhostServer::start(0, transactions).await?;
+    let ghost_port = ghost_server.port();
+    info!("Ghost Server started on port {}", ghost_port);
+
+    // Phase 2: Start MITM proxy that forwards to Ghost Server
+    info!("Starting HTTPS MITM proxy on port {}", port);
 
     // Generate a self-signed CA certificate for MITM
     let key_pair = KeyPair::generate()?;
@@ -38,8 +47,8 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
 
     let ca = RcgenAuthority::new(issuer, 1_000, aws_lc_rs::default_provider());
 
-    // Create the playback handler
-    let handler = PlaybackHandler::new(transactions);
+    // Create the forwarding handler
+    let handler = GhostForwarder::new(ghost_port);
 
     // Build the proxy with standard TLS configuration
     let crypto_provider = aws_lc_rs::default_provider();
@@ -60,6 +69,10 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
 
     // Start the proxy server
     info!("HTTPS MITM Proxy listening on 127.0.0.1:{}", actual_port);
+    info!(
+        "Forwarding all requests to Ghost Server on port {}",
+        ghost_port
+    );
     info!("Configure your client to trust the self-signed CA certificate or use --insecure");
 
     // Run proxy and signal handler concurrently
@@ -76,6 +89,11 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
 
     // Signal received, stop accepting new connections
     info!("Shutdown signal received, stopping playback proxy");
+
+    // Stop Ghost Server gracefully
+    if let Err(e) = ghost_server.stop().await {
+        error!("Error stopping Ghost Server: {}", e);
+    }
 
     // Note: Hudsucker proxy doesn't provide graceful shutdown mechanism
     // We rely on the process termination to stop accepting connections

@@ -2,6 +2,7 @@ use clap::Parser;
 
 mod beautify;
 mod cli;
+mod ghost_server;
 mod playback;
 mod recording;
 mod signal_sender;
