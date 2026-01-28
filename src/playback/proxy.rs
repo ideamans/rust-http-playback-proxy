@@ -1,7 +1,7 @@
 use anyhow::Result;
 use tracing::{error, info};
 
-use crate::ghost_server::GhostServer;
+use crate::ghost_server::GhostServerPool;
 use crate::traits::FileSystem;
 use crate::types::Transaction;
 
@@ -17,14 +17,18 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     port: u16,
     transactions: Vec<Transaction>,
 ) -> Result<()> {
-    info!("Starting playback mode with Ghost Server architecture");
+    info!("Starting playback mode with Ghost Server Pool architecture");
 
-    // Phase 1: Start Ghost Server on a random port
-    let ghost_server = GhostServer::start(0, transactions).await?;
-    let ghost_port = ghost_server.port();
-    info!("Ghost Server started on port {}", ghost_port);
+    // Phase 1: Start Ghost Server Pool (one server per domain)
+    let ghost_pool = GhostServerPool::start(transactions).await?;
+    let routing_table = ghost_pool.get_routing_table();
 
-    // Phase 2: Start MITM proxy that forwards to Ghost Server
+    info!(
+        "Ghost Server Pool started with {} servers",
+        routing_table.len()
+    );
+
+    // Phase 2: Start MITM proxy that forwards to Ghost Servers
     info!("Starting HTTPS MITM proxy on port {}", port);
 
     // Generate a self-signed CA certificate for MITM
@@ -47,8 +51,8 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
 
     let ca = RcgenAuthority::new(issuer, 1_000, aws_lc_rs::default_provider());
 
-    // Create the forwarding handler
-    let handler = GhostForwarder::new(ghost_port);
+    // Create the forwarding handler with routing table
+    let handler = GhostForwarder::new(routing_table);
 
     // Build the proxy with standard TLS configuration
     let crypto_provider = aws_lc_rs::default_provider();
@@ -69,10 +73,6 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
 
     // Start the proxy server
     info!("HTTPS MITM Proxy listening on 127.0.0.1:{}", actual_port);
-    info!(
-        "Forwarding all requests to Ghost Server on port {}",
-        ghost_port
-    );
     info!("Configure your client to trust the self-signed CA certificate or use --insecure");
 
     // Run proxy and signal handler concurrently
@@ -90,20 +90,16 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     // Signal received, stop accepting new connections
     info!("Shutdown signal received, stopping playback proxy");
 
-    // Stop Ghost Server gracefully
-    if let Err(e) = ghost_server.stop().await {
-        error!("Error stopping Ghost Server: {}", e);
-    }
+    // Abort proxy task first
+    proxy_task.abort();
 
-    // Note: Hudsucker proxy doesn't provide graceful shutdown mechanism
-    // We rely on the process termination to stop accepting connections
     // Give in-flight requests a moment to complete
-    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // Stop Ghost Server Pool
+    ghost_pool.stop().await;
 
     info!("Playback proxy stopped");
-
-    // Abort proxy task
-    proxy_task.abort();
 
     Ok(())
 }

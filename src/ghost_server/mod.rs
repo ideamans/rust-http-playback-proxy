@@ -8,11 +8,16 @@
 #![allow(dead_code)]
 
 mod handler;
+pub mod pool;
 mod server;
 
 #[cfg(test)]
 mod tests;
 
+pub use pool::GhostServerPool;
+#[allow(unused_imports)]
+pub use pool::OriginKey;
+#[allow(unused_imports)]
 pub use server::GhostServer;
 
 use crate::traits::FileSystem;
