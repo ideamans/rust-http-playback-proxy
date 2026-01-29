@@ -84,6 +84,9 @@ pub async fn start_recording_proxy(
     // Signal received, stop accepting new connections
     info!("Shutdown signal received, stopping proxy...");
 
+    // Ignore further shutdown signals to prevent interruption during batch processing
+    super::signal_handler::ignore_shutdown_signals();
+
     // Note: Hudsucker proxy doesn't provide graceful shutdown mechanism
     // We rely on the process termination to stop accepting connections
     // Give in-flight requests a moment to complete

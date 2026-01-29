@@ -2,7 +2,7 @@ use http_body_util::{BodyExt, Full};
 use hudsucker::{
     Body, HttpContext, HttpHandler, RequestOrResponse, hyper::Request, hyper::Response,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -36,6 +36,9 @@ pub struct RecordingHandler {
     // This allows accurate request-response correlation even with HTTP/2 multiplexing
     request_infos: Arc<Mutex<HashMap<RequestKey, RequestInfo>>>,
     request_counter: Arc<Mutex<u64>>,
+    // Track already-recorded (method, url) pairs to skip duplicates
+    // Only the first response for each method+URL is recorded
+    recorded_resources: Arc<Mutex<HashSet<(String, String)>>>,
 }
 
 impl RecordingHandler {
@@ -45,6 +48,7 @@ impl RecordingHandler {
             start_time: Arc::new(Instant::now()),
             request_infos: Arc::new(Mutex::new(HashMap::new())),
             request_counter: Arc::new(Mutex::new(0)),
+            recorded_resources: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -146,8 +150,36 @@ impl HttpHandler for RecordingHandler {
         let start_time = Arc::clone(&self.start_time);
         let request_infos = Arc::clone(&self.request_infos);
         let shared_inventory = Arc::clone(&self.shared_inventory);
+        let recorded_resources = Arc::clone(&self.recorded_resources);
 
         async move {
+            let method_str = request_method.to_string();
+            let url = request_uri.to_string();
+
+            // Skip if we already have a recording for this method+URL.
+            // Only the first response is meaningful; subsequent ones (e.g. 304 Not Modified
+            // from Lighthouse's repeated page loads) would overwrite with empty/stale data.
+            {
+                let recorded = recorded_resources.lock().await;
+                if recorded.contains(&(method_str.clone(), url.clone())) {
+                    info!(
+                        "Skipping duplicate response: {} {} (already recorded)",
+                        method_str, url
+                    );
+                    // Clean up request info
+                    let key = RequestKey {
+                        client_addr,
+                        method: method_str,
+                        url,
+                    };
+                    {
+                        let mut infos = request_infos.lock().await;
+                        infos.remove(&key);
+                    }
+                    return res;
+                }
+            }
+
             let headers = res.headers().clone();
             let http_version = res.version();
 
@@ -156,12 +188,10 @@ impl HttpHandler for RecordingHandler {
 
             info!("Recording response: {} ({:?})", status, http_version);
 
-            // Build request key from HttpContext (available in ideamans-hudsucker 0.25+)
-            // This allows accurate request-response correlation even with HTTP/2 multiplexing
-            let url = request_uri.to_string();
+            // Build request key for correlation
             let key = RequestKey {
                 client_addr,
-                method: request_method.to_string(),
+                method: method_str.clone(),
                 url: url.clone(),
             };
 
@@ -182,13 +212,9 @@ impl HttpHandler for RecordingHandler {
                 }
             };
 
-            let (method_str, url_for_resource, ttfb_ms, duration_ms) = if let Some(info) =
-                request_info
-            {
+            let (ttfb_ms, duration_ms) = if let Some(info) = request_info {
                 // Calculate TTFB relative to request start (pure TTFB duration)
-                let ttfb = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
-                // Store only the pure TTFB, not the absolute time
-                let ttfb_ms = ttfb;
+                let ttfb_ms = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
 
                 // Calculate download end time relative to request start (not proxy start)
                 let download_end = Instant::now();
@@ -200,31 +226,26 @@ impl HttpHandler for RecordingHandler {
 
                 info!(
                     "Matched response with request: {} {} (TTFB: {}ms, duration: {}ms, request offset: {}ms)",
-                    request_method, url, ttfb, duration_ms, info.elapsed_since_start
+                    method_str, url, ttfb_ms, duration_ms, info.elapsed_since_start
                 );
 
-                (
-                    request_method.to_string(),
-                    url.clone(),
-                    ttfb_ms,
-                    duration_ms,
-                )
+                (ttfb_ms, duration_ms)
             } else {
                 // Fallback - this should not happen with ideamans-hudsucker 0.25+ unless request was not recorded
                 error!(
                     "No matching request info found for: {} {} (client: {})",
-                    request_method, url, client_addr
+                    method_str, url, client_addr
                 );
                 let elapsed = ttfb_instant.duration_since(*start_time).as_millis() as u64;
                 let download_end = Instant::now();
                 let download_end_elapsed =
                     download_end.duration_since(*start_time).as_millis() as u64;
                 let duration = download_end_elapsed.saturating_sub(elapsed);
-                (request_method.to_string(), url.clone(), elapsed, duration)
+                (elapsed, duration)
             };
 
             // Create resource with minimal processing
-            let mut resource = Resource::new(method_str, url_for_resource);
+            let mut resource = Resource::new(method_str.clone(), url.clone());
             resource.status_code = Some(status.as_u16());
             resource.http_version = Some(http_version.into());
             resource.ttfb_ms = ttfb_ms;
@@ -296,10 +317,14 @@ impl HttpHandler for RecordingHandler {
             // Store raw body (as-is, possibly compressed) for later processing
             resource.raw_body = Some(body_bytes.to_vec());
 
-            // Add resource to inventory
+            // Add resource to inventory and mark as recorded
             {
                 let mut inventory = shared_inventory.lock().await;
                 inventory.resources.push(resource);
+            }
+            {
+                let mut recorded = recorded_resources.lock().await;
+                recorded.insert((method_str, url));
             }
 
             // Return response with the buffered body

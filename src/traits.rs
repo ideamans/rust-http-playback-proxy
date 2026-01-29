@@ -80,11 +80,17 @@ impl FileSystem for RealFileSystem {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        // Write and explicitly sync to disk to ensure visibility across processes
+        // Atomic write: write to .tmp file, sync, then rename
+        // This prevents 0-byte files if the process is interrupted during write
+        let tmp_path = path.with_extension(format!(
+            "{}.tmp",
+            path.extension().and_then(|e| e.to_str()).unwrap_or("dat")
+        ));
         use tokio::io::AsyncWriteExt;
-        let mut file = tokio::fs::File::create(path).await?;
+        let mut file = tokio::fs::File::create(&tmp_path).await?;
         file.write_all(content).await?;
-        file.sync_all().await?; // Ensure data is flushed to disk
+        file.sync_all().await?;
+        tokio::fs::rename(&tmp_path, path).await?;
         Ok(())
     }
 
