@@ -27,8 +27,12 @@ async fn main() -> anyhow::Result<()> {
         } => {
             recording::run_recording_mode(entry_url, port, device, inventory).await?;
         }
-        Commands::Playback { port, inventory } => {
-            playback::run_playback_mode(port, inventory).await?;
+        Commands::Playback {
+            port,
+            inventory,
+            full_throttle,
+        } => {
+            playback::run_playback_mode(port, inventory, full_throttle).await?;
         }
         Commands::Signal { pid, kind } => {
             let signal_kind = signal_sender::SignalKind::from_str(&kind)?;

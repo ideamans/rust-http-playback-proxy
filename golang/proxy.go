@@ -45,6 +45,7 @@ type RecordingOptions struct {
 type PlaybackOptions struct {
 	Port         int
 	InventoryDir string
+	FullThrottle bool // Optional: Disable timing control (TTFB and transfer speed) for fastest playback
 }
 
 // getAvailablePort finds an available port by binding to port 0 and releasing it
@@ -203,6 +204,10 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 	args = append(args, "--port", strconv.Itoa(port))
 
 	args = append(args, "--inventory", inventoryDir)
+
+	if opts.FullThrottle {
+		args = append(args, "--full-throttle")
+	}
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Stdout = os.Stdout

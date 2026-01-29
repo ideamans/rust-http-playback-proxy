@@ -315,6 +315,11 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
+  // Add full throttle flag
+  if (options.fullThrottle) {
+    args.push('--full-throttle');
+  }
+
   // Start the process
   const spawnOptions: any = {
     stdio: ['ignore', 'inherit', 'inherit'],

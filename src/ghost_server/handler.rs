@@ -48,7 +48,7 @@ pub async fn handle_request(
     match transaction {
         Some(transaction) => {
             info!("Found matching transaction for: {} {}", method, path);
-            serve_transaction(transaction.clone()).await
+            serve_transaction(transaction.clone(), state.full_throttle).await
         }
         None => {
             info!(
@@ -118,10 +118,11 @@ fn find_matching_transaction<'a>(
 /// Serve a transaction with timing control
 async fn serve_transaction(
     transaction: crate::types::Transaction,
+    full_throttle: bool,
 ) -> Result<Response<ResponseBody>, std::io::Error> {
     // Wait for TTFB before sending response headers
     let ttfb_ms = transaction.ttfb;
-    if ttfb_ms > 0 {
+    if !full_throttle && ttfb_ms > 0 {
         info!("Waiting {}ms for TTFB", ttfb_ms);
         tokio::time::sleep(Duration::from_millis(ttfb_ms)).await;
     }
@@ -195,29 +196,33 @@ async fn serve_transaction(
             total_chunks,
             0usize,
             false,
+            full_throttle,
         ),
-        |(mut iter, ttfb_instant, close_time, total, chunk_idx, sent_all)| async move {
+        |(mut iter, ttfb_instant, close_time, total, chunk_idx, sent_all, full_throttle)| async move {
             if sent_all {
                 // All chunks sent, wait until target_close_time before closing
-                let elapsed = ttfb_instant.elapsed().as_millis() as u64;
-                if close_time > elapsed {
-                    let wait_time = close_time - elapsed;
-                    info!(
-                        "All {} chunks sent, waiting {}ms before close",
-                        total, wait_time
-                    );
-                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                if !full_throttle {
+                    let elapsed = ttfb_instant.elapsed().as_millis() as u64;
+                    if close_time > elapsed {
+                        let wait_time = close_time - elapsed;
+                        info!(
+                            "All {} chunks sent, waiting {}ms before close",
+                            total, wait_time
+                        );
+                        tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                    }
                 }
                 return None;
             }
 
             if let Some(chunk) = iter.next() {
-                let elapsed = ttfb_instant.elapsed().as_millis() as u64;
-
                 // Wait until target_time for this chunk
-                if chunk.target_time > elapsed {
-                    let wait_time = chunk.target_time - elapsed;
-                    tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                if !full_throttle {
+                    let elapsed = ttfb_instant.elapsed().as_millis() as u64;
+                    if chunk.target_time > elapsed {
+                        let wait_time = chunk.target_time - elapsed;
+                        tokio::time::sleep(Duration::from_millis(wait_time)).await;
+                    }
                 }
 
                 let frame = Frame::data(Bytes::from(chunk.chunk));
@@ -232,6 +237,7 @@ async fn serve_transaction(
                         total,
                         chunk_idx + 1,
                         is_last,
+                        full_throttle,
                     ),
                 ))
             } else {

@@ -17,11 +17,18 @@ mod transaction_tests;
 #[cfg(test)]
 mod inventory_tests;
 
-pub async fn run_playback_mode(port: Option<u16>, inventory_dir: PathBuf) -> Result<()> {
+pub async fn run_playback_mode(
+    port: Option<u16>,
+    inventory_dir: PathBuf,
+    full_throttle: bool,
+) -> Result<()> {
     let port = get_port_or_default(port)?;
 
     println!("Starting playback mode on port {}", port);
     println!("Inventory directory: {:?}", inventory_dir);
+    if full_throttle {
+        println!("Full throttle mode: timing control disabled");
+    }
 
     // Load inventory
     let file_system = Arc::new(RealFileSystem);
@@ -42,7 +49,7 @@ pub async fn run_playback_mode(port: Option<u16>, inventory_dir: PathBuf) -> Res
 
     println!("Created {} transactions", transactions.len());
 
-    proxy::start_playback_proxy::<RealFileSystem>(port, transactions).await
+    proxy::start_playback_proxy::<RealFileSystem>(port, transactions, full_throttle).await
 }
 
 pub async fn load_inventory<F: FileSystem>(

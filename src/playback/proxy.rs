@@ -16,11 +16,12 @@ use hudsucker::{
 pub async fn start_playback_proxy<F: FileSystem + 'static>(
     port: u16,
     transactions: Vec<Transaction>,
+    full_throttle: bool,
 ) -> Result<()> {
     info!("Starting playback mode with Ghost Server Pool architecture");
 
     // Phase 1: Start Ghost Server Pool (one server per domain)
-    let ghost_pool = GhostServerPool::start(transactions).await?;
+    let ghost_pool = GhostServerPool::start(transactions, full_throttle).await?;
     let routing_table = ghost_pool.get_routing_table();
 
     info!(

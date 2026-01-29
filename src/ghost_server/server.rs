@@ -32,11 +32,17 @@ pub struct GhostServerState {
     pub transactions: Arc<Vec<Transaction>>,
     /// Server start time for relative timing
     pub start_time: Instant,
+    /// When true, skip all timing delays (TTFB, chunk timing, close timing)
+    pub full_throttle: bool,
 }
 
 impl GhostServer {
     /// Start the Ghost Server on the specified port
-    pub async fn start(port: u16, transactions: Vec<Transaction>) -> Result<Self> {
+    pub async fn start(
+        port: u16,
+        transactions: Vec<Transaction>,
+        full_throttle: bool,
+    ) -> Result<Self> {
         let addr: SocketAddr = format!("127.0.0.1:{}", port).parse()?;
         let listener = TcpListener::bind(addr).await?;
         let actual_addr = listener.local_addr()?;
@@ -49,6 +55,7 @@ impl GhostServer {
         let state = Arc::new(GhostServerState {
             transactions: Arc::new(transactions),
             start_time: Instant::now(),
+            full_throttle,
         });
 
         // Spawn server task
@@ -176,7 +183,7 @@ mod server_tests {
         let transactions = vec![];
 
         // Start server on random port
-        let server = GhostServer::start(0, transactions)
+        let server = GhostServer::start(0, transactions, false)
             .await
             .expect("Failed to start server");
 

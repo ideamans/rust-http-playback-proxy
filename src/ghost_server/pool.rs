@@ -71,7 +71,7 @@ pub struct GhostServerPool {
 
 impl GhostServerPool {
     /// Start Ghost Servers for all unique origins in the transactions
-    pub async fn start(transactions: Vec<Transaction>) -> Result<Self> {
+    pub async fn start(transactions: Vec<Transaction>, full_throttle: bool) -> Result<Self> {
         // Install the CryptoProvider for rustls
         let _ = aws_lc_rs::default_provider().install_default();
 
@@ -112,7 +112,7 @@ impl GhostServerPool {
         for (origin, (txs, http_version)) in origin_transactions {
             let origin_clone = origin.clone();
             server_futures.push(tokio::spawn(async move {
-                start_origin_server(origin_clone, txs, http_version).await
+                start_origin_server(origin_clone, txs, http_version, full_throttle).await
             }));
         }
 
@@ -220,6 +220,7 @@ async fn start_origin_server(
     origin: OriginKey,
     transactions: Vec<Transaction>,
     http_version: HttpVersion,
+    full_throttle: bool,
 ) -> Result<OriginServer> {
     // Find an available port
     let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -239,6 +240,7 @@ async fn start_origin_server(
     let state = Arc::new(GhostServerState {
         transactions: Arc::new(transactions),
         start_time: Instant::now(),
+        full_throttle,
     });
 
     // Spawn server task based on scheme
