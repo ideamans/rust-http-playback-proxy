@@ -43,7 +43,9 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
             inventory.resources.len()
         );
 
+        let total = inventory.resources.len();
         for (idx, resource) in inventory.resources.iter_mut().enumerate() {
+            info!("Processing resource {}/{}...", idx + 1, total);
             if let Err(e) = self.process_resource(resource).await {
                 error!(
                     "Failed to process resource #{} ({}): {}",
