@@ -31,8 +31,9 @@ async fn main() -> anyhow::Result<()> {
             port,
             inventory,
             full_throttle,
+            passthrough,
         } => {
-            playback::run_playback_mode(port, inventory, full_throttle).await?;
+            playback::run_playback_mode(port, inventory, full_throttle, passthrough).await?;
         }
         Commands::Signal { pid, kind } => {
             let signal_kind = signal_sender::SignalKind::from_str(&kind)?;

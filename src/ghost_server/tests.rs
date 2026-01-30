@@ -79,6 +79,53 @@ async fn test_ghost_server_returns_404_for_unknown() {
 
     assert_eq!(response.status(), 404);
 
+    // Verify X-Ghost-Miss header is set on miss responses
+    let ghost_miss = response.headers().get("x-ghost-miss");
+    assert!(
+        ghost_miss.is_some(),
+        "Expected X-Ghost-Miss header on 404 miss"
+    );
+    assert_eq!(ghost_miss.unwrap().to_str().unwrap(), "true");
+
+    server.stop().await.expect("Failed to stop server");
+}
+
+#[tokio::test]
+async fn test_ghost_server_miss_header_not_on_recorded_404() {
+    // A recorded 404 response should NOT have X-Ghost-Miss header
+    let transactions = vec![create_test_transaction(
+        "GET",
+        "http://example.com/not-found",
+        404,
+        b"Page not found",
+    )];
+
+    let server = GhostServer::start(0, transactions, false)
+        .await
+        .expect("Failed to start server");
+
+    let port = server.port();
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("http://127.0.0.1:{}/not-found", port))
+        .header("Host", "example.com")
+        .send()
+        .await
+        .expect("Request failed");
+
+    assert_eq!(response.status(), 404);
+
+    // Recorded 404 should NOT have X-Ghost-Miss header
+    let ghost_miss = response.headers().get("x-ghost-miss");
+    assert!(
+        ghost_miss.is_none(),
+        "Recorded 404 should not have X-Ghost-Miss header"
+    );
+
+    let body = response.text().await.expect("Failed to read body");
+    assert_eq!(body, "Page not found");
+
     server.stop().await.expect("Failed to stop server");
 }
 

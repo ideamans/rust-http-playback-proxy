@@ -88,10 +88,12 @@ pub struct GhostForwarder {
     >,
     /// HTTP client (plain, no TLS)
     http_client: Client<HttpConnector, Empty<Bytes>>,
+    /// Whether to forward unmatched requests to real servers
+    passthrough: bool,
 }
 
 impl GhostForwarder {
-    pub fn new(routing_table: HashMap<String, RoutingEntry>) -> Self {
+    pub fn new(routing_table: HashMap<String, RoutingEntry>, passthrough: bool) -> Self {
         // Create rustls config that accepts self-signed certificates
         let tls_config = rustls::ClientConfig::builder()
             .dangerous()
@@ -115,6 +117,7 @@ impl GhostForwarder {
             routing_table: Arc::new(routing_table),
             https_client,
             http_client,
+            passthrough,
         }
     }
 }
@@ -128,6 +131,7 @@ impl HttpHandler for GhostForwarder {
         let routing_table = self.routing_table.clone();
         let https_client = self.https_client.clone();
         let http_client = self.http_client.clone();
+        let passthrough = self.passthrough;
 
         async move {
             let method = req.method().clone();
@@ -141,26 +145,23 @@ impl HttpHandler for GhostForwarder {
             }
 
             // Extract host from multiple sources (HTTP/2 and HTTP/1.1 compatible)
-            let host: String = if let Some(authority) = headers
+            // host_with_port preserves the original host:port for passthrough
+            let host_with_port: String = if let Some(authority) = headers
                 .get(":authority")
                 .and_then(|h| h.to_str().ok())
                 .filter(|s| !s.is_empty())
             {
-                authority.split(':').next().unwrap_or(authority).to_string()
+                authority.to_string()
             } else if let Some(host_header) = headers
                 .get("host")
                 .and_then(|h| h.to_str().ok())
                 .filter(|s| !s.is_empty())
             {
-                host_header
-                    .split(':')
-                    .next()
-                    .unwrap_or(host_header)
-                    .to_string()
+                host_header.to_string()
+            } else if let Some(authority) = uri.authority() {
+                authority.as_str().to_string()
             } else if let Some(uri_host) = uri.host() {
                 uri_host.to_string()
-            } else if let Some(authority) = uri.authority() {
-                authority.host().to_string()
             } else {
                 error!("No valid host in request: {} {}", method, uri);
                 let error_response = Response::builder()
@@ -170,8 +171,16 @@ impl HttpHandler for GhostForwarder {
                 return RequestOrResponse::Response(error_response);
             };
 
+            // Strip port for routing table lookup
+            let host = host_with_port
+                .split(':')
+                .next()
+                .unwrap_or(&host_with_port)
+                .to_string();
+
             // Determine scheme from URI (HTTPS by default for proxied requests)
             let scheme = uri.scheme_str().unwrap_or("https");
+            let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
 
             // Look up the Ghost Server for this origin
             let routing_key = format!("{}://{}", scheme, host);
@@ -190,6 +199,22 @@ impl HttpHandler for GhostForwarder {
                             routing_key, alt_key
                         );
                         (entry.port, entry.is_https)
+                    } else if passthrough {
+                        // Passthrough: forward to real server
+                        info!(
+                            "No Ghost Server for {}, passthrough to real server",
+                            routing_key
+                        );
+                        return forward_to_real_server(
+                            &method,
+                            scheme,
+                            &host_with_port,
+                            path_and_query,
+                            &headers,
+                            &https_client,
+                            &http_client,
+                        )
+                        .await;
                     } else {
                         error!("No Ghost Server available for host: {}", host);
                         let error_response = Response::builder()
@@ -201,7 +226,6 @@ impl HttpHandler for GhostForwarder {
                 }
             };
 
-            let path_and_query = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
             let protocol = if use_https { "HTTPS" } else { "HTTP" };
 
             info!(
@@ -271,13 +295,36 @@ impl HttpHandler for GhostForwarder {
             match result {
                 Ok(ghost_response) => {
                     let status = ghost_response.status();
-                    let headers = ghost_response.headers().clone();
+                    let resp_headers = ghost_response.headers().clone();
 
                     info!("Ghost Server responded with status: {}", status);
 
+                    // Check for Ghost Server miss (X-Ghost-Miss header)
+                    if passthrough
+                        && resp_headers
+                            .get("x-ghost-miss")
+                            .and_then(|v| v.to_str().ok())
+                            == Some("true")
+                    {
+                        info!(
+                            "Ghost Server miss detected, passthrough to real server: {} {}",
+                            method, path_and_query
+                        );
+                        return forward_to_real_server(
+                            &method,
+                            scheme,
+                            &host_with_port,
+                            path_and_query,
+                            &headers,
+                            &https_client,
+                            &http_client,
+                        )
+                        .await;
+                    }
+
                     let mut response_builder = Response::builder().status(status.as_u16());
 
-                    for (name, value) in headers.iter() {
+                    for (name, value) in resp_headers.iter() {
                         let name_str = name.as_str().to_lowercase();
 
                         if matches!(
@@ -324,5 +371,139 @@ impl HttpHandler for GhostForwarder {
 
     async fn handle_response(&mut self, _ctx: &HttpContext, res: Response<Body>) -> Response<Body> {
         res
+    }
+}
+
+/// Forward a request to the real upstream server (passthrough)
+async fn forward_to_real_server(
+    method: &hyper::Method,
+    scheme: &str,
+    host_with_port: &str,
+    path_and_query: &str,
+    original_headers: &hyper::HeaderMap,
+    https_client: &Client<
+        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        Empty<Bytes>,
+    >,
+    http_client: &Client<HttpConnector, Empty<Bytes>>,
+) -> RequestOrResponse {
+    let real_uri = format!("{}://{}{}", scheme, host_with_port, path_and_query);
+    info!(
+        "Passthrough: forwarding to real server: {} {}",
+        method, real_uri
+    );
+
+    let parsed_uri = match real_uri.parse::<hyper::Uri>() {
+        Ok(uri) => uri,
+        Err(e) => {
+            error!("Failed to parse passthrough URI: {}", e);
+            let error_response = Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::from(format!("Passthrough URI parse error: {}", e)))
+                .unwrap();
+            return RequestOrResponse::Response(error_response);
+        }
+    };
+
+    let mut request_builder = Request::builder().method(method.clone()).uri(parsed_uri);
+
+    // Forward headers, skipping hop-by-hop headers
+    for (name, value) in original_headers.iter() {
+        let name_str = name.as_str().to_lowercase();
+
+        if matches!(
+            name_str.as_str(),
+            "host"
+                | ":authority"
+                | "connection"
+                | "keep-alive"
+                | "proxy-authenticate"
+                | "proxy-authorization"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+                | "proxy-connection"
+        ) {
+            continue;
+        }
+
+        request_builder = request_builder.header(name.clone(), value.clone());
+    }
+
+    let real_request = match request_builder.body(Empty::<Bytes>::new()) {
+        Ok(req) => req,
+        Err(e) => {
+            error!("Failed to build passthrough request: {}", e);
+            let error_response = Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(format!(
+                    "Passthrough request build error: {}",
+                    e
+                )))
+                .unwrap();
+            return RequestOrResponse::Response(error_response);
+        }
+    };
+
+    let use_https = scheme == "https";
+    let result = if use_https {
+        https_client.request(real_request).await
+    } else {
+        http_client.request(real_request).await
+    };
+
+    match result {
+        Ok(real_response) => {
+            let status = real_response.status();
+            let resp_headers = real_response.headers().clone();
+
+            info!("Passthrough: real server responded with status: {}", status);
+
+            let mut response_builder = Response::builder().status(status.as_u16());
+
+            for (name, value) in resp_headers.iter() {
+                let name_str = name.as_str().to_lowercase();
+
+                if matches!(
+                    name_str.as_str(),
+                    "connection" | "keep-alive" | "transfer-encoding" | "proxy-connection"
+                ) {
+                    continue;
+                }
+
+                response_builder = response_builder.header(name.clone(), value.clone());
+            }
+
+            use http_body_util::BodyExt;
+            let body_stream = real_response
+                .into_body()
+                .into_data_stream()
+                .map_err(|e| std::io::Error::other(format!("passthrough stream error: {}", e)));
+            let body = Body::from_stream(body_stream);
+
+            match response_builder.body(body) {
+                Ok(response) => RequestOrResponse::Response(response),
+                Err(e) => {
+                    error!("Failed to build passthrough response: {}", e);
+                    let error_response = Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from(format!(
+                            "Passthrough response build error: {}",
+                            e
+                        )))
+                        .unwrap();
+                    RequestOrResponse::Response(error_response)
+                }
+            }
+        }
+        Err(e) => {
+            error!("Passthrough: failed to forward to real server: {}", e);
+            let error_response = Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(Body::from(format!("Passthrough error: {}", e)))
+                .unwrap();
+            RequestOrResponse::Response(error_response)
+        }
     }
 }

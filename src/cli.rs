@@ -60,6 +60,13 @@ pub enum Commands {
             help = "Disable timing control (TTFB and transfer speed) for fastest playback"
         )]
         full_throttle: bool,
+
+        #[arg(
+            long,
+            default_value_t = false,
+            help = "Forward unmatched requests to real servers instead of returning 404"
+        )]
+        passthrough: bool,
     },
 
     /// Send signal to a process (internal helper, primarily for Windows)

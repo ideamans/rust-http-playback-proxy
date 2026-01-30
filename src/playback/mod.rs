@@ -21,6 +21,7 @@ pub async fn run_playback_mode(
     port: Option<u16>,
     inventory_dir: PathBuf,
     full_throttle: bool,
+    passthrough: bool,
 ) -> Result<()> {
     let port = get_port_or_default(port)?;
 
@@ -28,6 +29,9 @@ pub async fn run_playback_mode(
     println!("Inventory directory: {:?}", inventory_dir);
     if full_throttle {
         println!("Full throttle mode: timing control disabled");
+    }
+    if passthrough {
+        println!("Passthrough mode: unmatched requests will be forwarded to real servers");
     }
 
     // Load inventory
@@ -49,7 +53,8 @@ pub async fn run_playback_mode(
 
     println!("Created {} transactions", transactions.len());
 
-    proxy::start_playback_proxy::<RealFileSystem>(port, transactions, full_throttle).await
+    proxy::start_playback_proxy::<RealFileSystem>(port, transactions, full_throttle, passthrough)
+        .await
 }
 
 pub async fn load_inventory<F: FileSystem>(

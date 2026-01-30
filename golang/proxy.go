@@ -46,6 +46,7 @@ type PlaybackOptions struct {
 	Port         int
 	InventoryDir string
 	FullThrottle bool // Optional: Disable timing control (TTFB and transfer speed) for fastest playback
+	Passthrough  bool // Optional: Forward unmatched requests to real servers instead of returning 404
 }
 
 // getAvailablePort finds an available port by binding to port 0 and releasing it
@@ -207,6 +208,10 @@ func StartPlayback(opts PlaybackOptions) (*Proxy, error) {
 
 	if opts.FullThrottle {
 		args = append(args, "--full-throttle")
+	}
+
+	if opts.Passthrough {
+		args = append(args, "--passthrough")
 	}
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)

@@ -1164,6 +1164,155 @@ async fn test_inventory_structure_validation() {
     println!("Inventory structure validation completed successfully!");
 }
 
+/// Start the HTTP playback proxy in playback mode with --passthrough flag
+async fn start_playback_proxy_with_passthrough(port: u16, inventory_dir: &Path) -> Result<Child> {
+    let binary_path = get_binary_path();
+
+    let args = vec![
+        "playback".to_string(),
+        "--port".to_string(),
+        port.to_string(),
+        "--inventory".to_string(),
+        inventory_dir.to_string_lossy().to_string(),
+        "--passthrough".to_string(),
+        "--full-throttle".to_string(),
+    ];
+
+    let child = Command::new(&binary_path)
+        .args(&args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+
+    // Wait for the proxy to start and be ready
+    sleep(Duration::from_millis(1000)).await;
+
+    let mut connected = false;
+    for attempt in 1..=20 {
+        if std::net::TcpStream::connect_timeout(
+            &format!("127.0.0.1:{}", port).parse().unwrap(),
+            Duration::from_millis(500),
+        )
+        .is_ok()
+        {
+            connected = true;
+            println!(
+                "Playback proxy (passthrough) ready on port {} (attempt {})",
+                port, attempt
+            );
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+    }
+
+    if !connected {
+        eprintln!("Playback proxy did not start on port {}", port);
+        return Err(anyhow::anyhow!("Playback proxy failed to start"));
+    }
+
+    Ok(child)
+}
+
+#[tokio::test]
+async fn test_passthrough_forwards_unmatched_requests() {
+    // Build binary if needed
+    ensure_binary_exists().await.expect("Binary not found");
+
+    let temp_dir = TempDir::new().expect("Failed to create temp directory");
+    let inventory_dir = temp_dir.path().to_path_buf();
+
+    // Start static web server (will serve as the "real" upstream for passthrough)
+    let static_server = StaticServer::start()
+        .await
+        .expect("Failed to start static server");
+    let server_url = static_server.url();
+
+    let recording_proxy_port = find_free_port().expect("Failed to find free port");
+
+    // Record only the index page
+    let recording_proxy = start_recording_proxy(recording_proxy_port, &inventory_dir)
+        .await
+        .expect("Failed to start recording proxy");
+
+    let client = http_client_with_proxy(recording_proxy_port).await;
+
+    // Only record the index page
+    let response = client
+        .get(&server_url)
+        .send()
+        .await
+        .expect("Recording request failed");
+    assert!(response.status().is_success());
+    let _ = response.text().await;
+
+    // Stop recording proxy gracefully
+    stop_recording_proxy(recording_proxy).await;
+
+    // Verify inventory was saved
+    let inventory_file = inventory_dir.join("index.json");
+    assert!(
+        inventory_file.exists(),
+        "index.json must exist after recording"
+    );
+
+    // Start playback proxy WITH passthrough (keep static server running!)
+    let playback_proxy_port = find_free_port().expect("Failed to find free port");
+    let mut playback_proxy =
+        start_playback_proxy_with_passthrough(playback_proxy_port, &inventory_dir)
+            .await
+            .expect("Failed to start playback proxy with passthrough");
+
+    let playback_client = http_client_with_proxy(playback_proxy_port).await;
+
+    // Request the recorded path - should be served from inventory
+    let response = playback_client
+        .get(&server_url)
+        .send()
+        .await
+        .expect("Playback request for recorded path failed");
+    assert!(
+        response.status().is_success(),
+        "Recorded path should succeed: status={}",
+        response.status()
+    );
+    let body = response.text().await.expect("Failed to read body");
+    assert!(
+        body.contains("Test Page"),
+        "Recorded path should return recorded content"
+    );
+
+    // Request an unrecorded path - should be forwarded to real server via passthrough
+    let css_url = format!("{}/style.css", server_url);
+    let response = playback_client
+        .get(&css_url)
+        .send()
+        .await
+        .expect("Passthrough request failed");
+    assert!(
+        response.status().is_success(),
+        "Passthrough should succeed for unrecorded path: status={}",
+        response.status()
+    );
+    let body = response
+        .text()
+        .await
+        .expect("Failed to read passthrough body");
+    assert!(
+        body.contains("font-family"),
+        "Passthrough should return real CSS content, got: {}",
+        &body[..body.len().min(200)]
+    );
+
+    // Stop playback proxy
+    let _ = playback_proxy.kill();
+    let _ = playback_proxy.wait();
+
+    // Now stop the static server
+    static_server.shutdown();
+
+    println!("Passthrough test completed successfully!");
+}
+
 // Removed: test_http_shutdown - Control port functionality removed from system
 
 // Removed: test_playback_reload - Reload functionality has been removed from the system

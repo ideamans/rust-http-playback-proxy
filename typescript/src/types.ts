@@ -60,6 +60,7 @@ export interface PlaybackOptions {
   port?: number;
   inventoryDir?: string;
   fullThrottle?: boolean; // Optional: Disable timing control (TTFB and transfer speed) for fastest playback
+  passthrough?: boolean; // Optional: Forward unmatched requests to real servers instead of returning 404
 }
 
 /**

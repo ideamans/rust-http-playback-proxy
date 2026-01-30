@@ -17,6 +17,7 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     port: u16,
     transactions: Vec<Transaction>,
     full_throttle: bool,
+    passthrough: bool,
 ) -> Result<()> {
     info!("Starting playback mode with Ghost Server Pool architecture");
 
@@ -53,7 +54,7 @@ pub async fn start_playback_proxy<F: FileSystem + 'static>(
     let ca = RcgenAuthority::new(issuer, 1_000, aws_lc_rs::default_provider());
 
     // Create the forwarding handler with routing table
-    let handler = GhostForwarder::new(routing_table);
+    let handler = GhostForwarder::new(routing_table, passthrough);
 
     // Build the proxy with standard TLS configuration
     let crypto_provider = aws_lc_rs::default_provider();

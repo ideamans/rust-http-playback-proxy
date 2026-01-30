@@ -61,6 +61,7 @@ pub async fn handle_request(
             );
             Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
+                .header("X-Ghost-Miss", "true")
                 .body(box_body(body.into_bytes()))
                 .unwrap())
         }

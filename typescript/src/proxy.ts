@@ -320,6 +320,11 @@ export async function startPlayback(options: PlaybackOptions): Promise<Proxy> {
     args.push('--full-throttle');
   }
 
+  // Add passthrough flag
+  if (options.passthrough) {
+    args.push('--passthrough');
+  }
+
   // Start the process
   const spawnOptions: any = {
     stdio: ['ignore', 'inherit', 'inherit'],
