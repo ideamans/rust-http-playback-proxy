@@ -84,6 +84,10 @@ mod recording_tests {
         let deflate = ContentEncodingType::from_str("deflate").unwrap();
         assert!(matches!(deflate, ContentEncodingType::Deflate));
 
+        // Test zstd
+        let zstd = ContentEncodingType::from_str("zstd").unwrap();
+        assert!(matches!(zstd, ContentEncodingType::Zstd));
+
         // Test identity
         let identity = ContentEncodingType::from_str("identity").unwrap();
         assert!(matches!(identity, ContentEncodingType::Identity));
@@ -91,6 +95,9 @@ mod recording_tests {
         // Test case insensitivity
         let gzip_upper = ContentEncodingType::from_str("GZIP").unwrap();
         assert!(matches!(gzip_upper, ContentEncodingType::Gzip));
+
+        let zstd_upper = ContentEncodingType::from_str("ZSTD").unwrap();
+        assert!(matches!(zstd_upper, ContentEncodingType::Zstd));
 
         // Test invalid encoding
         let invalid = ContentEncodingType::from_str("invalid-encoding");

@@ -92,8 +92,11 @@ pub enum ContentEncodingType {
     Compress,
     Deflate,
     Br,
+    Zstd,
     Identity,
 }
+
+pub const SUPPORTED_ACCEPT_ENCODING: &str = "gzip, deflate, br, zstd";
 
 impl FromStr for ContentEncodingType {
     type Err = String;
@@ -104,6 +107,7 @@ impl FromStr for ContentEncodingType {
             "compress" => Ok(ContentEncodingType::Compress),
             "deflate" => Ok(ContentEncodingType::Deflate),
             "br" => Ok(ContentEncodingType::Br),
+            "zstd" => Ok(ContentEncodingType::Zstd),
             "identity" => Ok(ContentEncodingType::Identity),
             _ => Err(format!("Unknown encoding type: {}", s)),
         }

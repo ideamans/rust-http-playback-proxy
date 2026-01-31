@@ -133,6 +133,13 @@ impl HttpHandler for RecordingHandler {
                 );
             }
 
+            // Rewrite Accept-Encoding to only include supported encodings
+            let (mut parts, body) = req.into_parts();
+            parts.headers.insert(
+                hyper::header::ACCEPT_ENCODING,
+                hyper::header::HeaderValue::from_static(crate::types::SUPPORTED_ACCEPT_ENCODING),
+            );
+            let req = Request::from_parts(parts, body);
             RequestOrResponse::Request(req)
         }
     }

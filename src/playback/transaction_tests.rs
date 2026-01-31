@@ -185,6 +185,94 @@ mod tests {
     }
 
     #[test]
+    fn test_compress_zstd_content() {
+        let content = b"This is test content for zstd compression testing. Zstd is a fast compression algorithm.";
+
+        let compressed = compress_content(content, &ContentEncodingType::Zstd).unwrap();
+
+        // Compressed should be different from original
+        assert_ne!(compressed, content);
+        // Zstd should compress this content
+        assert!(compressed.len() < content.len());
+    }
+
+    #[test]
+    fn test_compress_brotli_content() {
+        let content = b"This is test content for brotli compression testing. Brotli is a compression algorithm.";
+
+        let compressed = compress_content(content, &ContentEncodingType::Br).unwrap();
+
+        assert_ne!(compressed, content);
+        assert!(compressed.len() < content.len());
+    }
+
+    #[test]
+    fn test_compress_deflate_content() {
+        let content = b"This is test content for deflate compression testing. Deflate is a classic algorithm.";
+
+        let compressed = compress_content(content, &ContentEncodingType::Deflate).unwrap();
+
+        assert_ne!(compressed, content);
+        assert!(!compressed.is_empty());
+    }
+
+    #[test]
+    fn test_zstd_compress_decompress_roundtrip() {
+        let original = b"Roundtrip test content for zstd. We compress then decompress to verify data integrity.";
+
+        let compressed = compress_content(original, &ContentEncodingType::Zstd).unwrap();
+        assert_ne!(compressed, original.to_vec());
+
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(&compressed)).unwrap();
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
+    fn test_gzip_compress_decompress_roundtrip() {
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+
+        let original = b"Roundtrip test content for gzip compression and decompression.";
+
+        let compressed = compress_content(original, &ContentEncodingType::Gzip).unwrap();
+        assert_ne!(compressed, original.to_vec());
+
+        let mut decoder = GzDecoder::new(compressed.as_slice());
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
+    fn test_brotli_compress_decompress_roundtrip() {
+        let original = b"Roundtrip test content for brotli compression and decompression.";
+
+        let compressed = compress_content(original, &ContentEncodingType::Br).unwrap();
+        assert_ne!(compressed, original.to_vec());
+
+        let mut decompressed = Vec::new();
+        brotli::BrotliDecompress(&mut std::io::Cursor::new(&compressed), &mut decompressed)
+            .unwrap();
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
+    fn test_deflate_compress_decompress_roundtrip() {
+        use flate2::read::DeflateDecoder;
+        use std::io::Read;
+
+        let original = b"Roundtrip test content for deflate compression and decompression.";
+
+        let compressed = compress_content(original, &ContentEncodingType::Deflate).unwrap();
+        assert_ne!(compressed, original.to_vec());
+
+        let mut decoder = DeflateDecoder::new(compressed.as_slice());
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(decompressed, original);
+    }
+
+    #[test]
     fn test_compress_identity_content() {
         let content = b"This content should not be compressed.";
 
@@ -246,6 +334,142 @@ mod tests {
         if !chunks.is_empty() {
             assert!(target_close_time >= chunks.last().unwrap().target_time);
         }
+    }
+
+    #[tokio::test]
+    async fn test_convert_resource_with_zstd_encoding() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+
+        // Set up a file with plain text content
+        let original_content =
+            b"Hello, World! This is content to be zstd-compressed during playback.";
+        let content_path = inventory_dir.join("contents/get/https/example.com/data.txt");
+        mock_fs.set_file(&content_path.to_string_lossy(), original_content.to_vec());
+
+        let mut resource = Resource::new(
+            "GET".to_string(),
+            "https://example.com/data.txt".to_string(),
+        );
+        resource.content_file_path = Some("contents/get/https/example.com/data.txt".to_string());
+        resource.content_encoding = Some(ContentEncodingType::Zstd);
+        resource.status_code = Some(200);
+        resource.ttfb_ms = 50;
+        resource.mbps = Some(1.0);
+
+        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, mock_fs)
+            .await
+            .unwrap();
+
+        assert!(transaction.is_some());
+        let transaction = transaction.unwrap();
+
+        // Verify chunks contain zstd-compressed data
+        let mut combined = Vec::new();
+        for chunk in &transaction.chunks {
+            combined.extend_from_slice(&chunk.chunk);
+        }
+
+        // Data should be different from the original (it's compressed)
+        assert_ne!(combined, original_content.to_vec());
+
+        // Decompress and verify roundtrip
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(&combined)).unwrap();
+        assert_eq!(decompressed, original_content);
+    }
+
+    #[tokio::test]
+    async fn test_convert_resource_with_gzip_encoding() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+
+        let original_content =
+            b"Hello, World! This is content to be gzip-compressed during playback.";
+        let content_path = inventory_dir.join("contents/get/https/example.com/data.txt");
+        mock_fs.set_file(&content_path.to_string_lossy(), original_content.to_vec());
+
+        let mut resource = Resource::new(
+            "GET".to_string(),
+            "https://example.com/data.txt".to_string(),
+        );
+        resource.content_file_path = Some("contents/get/https/example.com/data.txt".to_string());
+        resource.content_encoding = Some(ContentEncodingType::Gzip);
+        resource.status_code = Some(200);
+        resource.ttfb_ms = 50;
+        resource.mbps = Some(1.0);
+
+        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, mock_fs)
+            .await
+            .unwrap();
+
+        assert!(transaction.is_some());
+        let transaction = transaction.unwrap();
+
+        let mut combined = Vec::new();
+        for chunk in &transaction.chunks {
+            combined.extend_from_slice(&chunk.chunk);
+        }
+
+        // Data should be different from the original (it's compressed)
+        assert_ne!(combined, original_content.to_vec());
+
+        // Decompress and verify roundtrip
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+        let mut decoder = GzDecoder::new(combined.as_slice());
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(decompressed, original_content);
+    }
+
+    #[tokio::test]
+    async fn test_convert_resource_with_brotli_encoding() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+
+        let original_content =
+            b"Hello, World! This is content to be brotli-compressed during playback.";
+        let content_path = inventory_dir.join("contents/get/https/example.com/data.txt");
+        mock_fs.set_file(&content_path.to_string_lossy(), original_content.to_vec());
+
+        let mut resource = Resource::new(
+            "GET".to_string(),
+            "https://example.com/data.txt".to_string(),
+        );
+        resource.content_file_path = Some("contents/get/https/example.com/data.txt".to_string());
+        resource.content_encoding = Some(ContentEncodingType::Br);
+        resource.status_code = Some(200);
+        resource.ttfb_ms = 50;
+        resource.mbps = Some(1.0);
+
+        let transaction = convert_resource_to_transaction(&resource, &inventory_dir, mock_fs)
+            .await
+            .unwrap();
+
+        assert!(transaction.is_some());
+        let transaction = transaction.unwrap();
+
+        let mut combined = Vec::new();
+        for chunk in &transaction.chunks {
+            combined.extend_from_slice(&chunk.chunk);
+        }
+
+        assert_ne!(combined, original_content.to_vec());
+
+        // Decompress and verify roundtrip
+        let mut decompressed = Vec::new();
+        brotli::BrotliDecompress(
+            &mut std::io::Cursor::new(combined.as_slice()),
+            &mut decompressed,
+        )
+        .unwrap();
+        assert_eq!(decompressed, original_content);
     }
 
     #[test]

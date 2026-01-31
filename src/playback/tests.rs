@@ -368,6 +368,24 @@ mod playback_tests {
     }
 
     #[test]
+    fn test_compress_zstd_content() {
+        use crate::playback::transaction::compress_content;
+
+        let content = b"This is test content for zstd compression testing. Zstd is a fast compression algorithm developed by Facebook.";
+
+        let compressed = compress_content(content, &ContentEncodingType::Zstd).unwrap();
+
+        // Compressed content should be different
+        assert_ne!(compressed, content);
+        // Zstd should compress this content
+        assert!(compressed.len() < content.len());
+
+        // Verify roundtrip: decompress back
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(&compressed)).unwrap();
+        assert_eq!(decompressed, content);
+    }
+
+    #[test]
     fn test_compress_very_small_content() {
         use crate::playback::transaction::compress_content;
 
@@ -498,11 +516,131 @@ mod playback_tests {
         assert!(ContentEncodingType::from_str("identity").is_ok());
 
         // Case insensitive
+        assert!(ContentEncodingType::from_str("zstd").is_ok());
+
+        // Case insensitive
         assert!(ContentEncodingType::from_str("GZIP").is_ok());
         assert!(ContentEncodingType::from_str("Br").is_ok());
+        assert!(ContentEncodingType::from_str("ZSTD").is_ok());
 
         // Invalid
         assert!(ContentEncodingType::from_str("unknown").is_err());
         assert!(ContentEncodingType::from_str("").is_err());
+    }
+
+    #[tokio::test]
+    async fn test_zstd_recording_playback_roundtrip() {
+        // Simulate the full recording→playback pipeline for zstd:
+        // 1. Start with plain content
+        // 2. Compress with zstd (simulating what an upstream server sends)
+        // 3. Decompress (simulating recording batch processing)
+        // 4. Re-compress with zstd (simulating playback transaction conversion)
+        // 5. Decompress and verify original content is preserved
+
+        let original_content = b"<html><body><h1>Full roundtrip zstd test</h1><p>This verifies the entire recording and playback pipeline.</p></body></html>";
+
+        // Step 1: Compress (simulating upstream server response)
+        let compressed =
+            zstd::stream::encode_all(std::io::Cursor::new(original_content.as_slice()), 0).unwrap();
+        assert_ne!(compressed, original_content.to_vec());
+
+        // Step 2: Decompress (simulating batch processor decompression)
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(&compressed)).unwrap();
+        assert_eq!(decompressed, original_content);
+
+        // Step 3: Re-compress (simulating playback transaction preparation)
+        use crate::playback::transaction::compress_content;
+        let recompressed = compress_content(&decompressed, &ContentEncodingType::Zstd).unwrap();
+
+        // Step 4: Final decompress (simulating what a browser receives)
+        let final_content = zstd::stream::decode_all(std::io::Cursor::new(&recompressed)).unwrap();
+        assert_eq!(final_content, original_content);
+    }
+
+    #[tokio::test]
+    async fn test_convert_resource_with_zstd_roundtrip() {
+        use crate::playback::transaction::convert_resource_to_transaction;
+        use crate::traits::RealFileSystem;
+
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+        let contents_dir = inventory_dir.join("contents");
+        tokio::fs::create_dir_all(&contents_dir).await.unwrap();
+
+        // Create a test file (stored as decompressed content, as batch processor would produce)
+        let original_text =
+            b"Zstd roundtrip: recording stores decompressed, playback re-compresses.";
+        let file_path = "get/https/example.com/zstd-test.txt";
+        let full_file_path = contents_dir.join(file_path);
+        if let Some(parent) = full_file_path.parent() {
+            tokio::fs::create_dir_all(parent).await.unwrap();
+        }
+        tokio::fs::write(&full_file_path, original_text)
+            .await
+            .unwrap();
+
+        // Create a resource that references this file with zstd encoding
+        let mut resource = Resource::new(
+            "GET".to_string(),
+            "https://example.com/zstd-test.txt".to_string(),
+        );
+        resource.status_code = Some(200);
+        resource.ttfb_ms = 50;
+        resource.content_file_path = Some(format!("contents/{}", file_path));
+        resource.content_encoding = Some(ContentEncodingType::Zstd);
+        resource.mbps = Some(1.0);
+
+        // Convert to transaction (should re-compress with zstd)
+        let transaction =
+            convert_resource_to_transaction(&resource, &inventory_dir, Arc::new(RealFileSystem))
+                .await
+                .unwrap();
+
+        assert!(transaction.is_some());
+        let transaction = transaction.unwrap();
+
+        // Combine chunks
+        let mut combined = Vec::new();
+        for chunk in &transaction.chunks {
+            combined.extend_from_slice(&chunk.chunk);
+        }
+
+        // Content should be zstd-compressed (different from original)
+        assert_ne!(combined, original_text.to_vec());
+
+        // Decompress and verify
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(&combined)).unwrap();
+        assert_eq!(decompressed, original_text);
+    }
+
+    #[test]
+    fn test_compress_zstd_empty_content() {
+        use crate::playback::transaction::compress_content;
+
+        let empty = b"";
+        let compressed = compress_content(empty, &ContentEncodingType::Zstd).unwrap();
+        // Zstd compressed empty content still has a frame header
+        assert!(!compressed.is_empty());
+
+        // Should decompress back to empty
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(&compressed)).unwrap();
+        assert_eq!(decompressed, empty);
+    }
+
+    #[test]
+    fn test_compress_zstd_large_content() {
+        use crate::playback::transaction::compress_content;
+
+        // Test with larger content to verify compression ratio
+        let large_content = "A".repeat(100_000);
+        let compressed =
+            compress_content(large_content.as_bytes(), &ContentEncodingType::Zstd).unwrap();
+
+        // Highly repetitive content should compress significantly
+        assert!(compressed.len() < large_content.len() / 10);
+
+        // Verify decompression
+        let decompressed = zstd::stream::decode_all(std::io::Cursor::new(&compressed)).unwrap();
+        assert_eq!(decompressed, large_content.as_bytes());
     }
 }

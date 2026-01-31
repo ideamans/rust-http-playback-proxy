@@ -90,6 +90,8 @@ func main() {
     p, err := proxy.StartPlayback(proxy.PlaybackOptions{
         Port:         8080,
         InventoryDir: "./inventory",
+        FullThrottle: false, // Set true to disable timing control (TTFB and transfer speed)
+        Passthrough:  true,  // Forward unmatched requests to real servers instead of 404
     })
     if err != nil {
         panic(err)
@@ -158,6 +160,8 @@ func main() {
 #### `PlaybackOptions`
 - `Port` (int, optional): Port to listen on (default: 8080, will auto-search)
 - `InventoryDir` (string, optional): Directory containing inventory (default: ./inventory)
+- `FullThrottle` (bool, optional): Disable timing control (TTFB and transfer speed) for fastest playback
+- `Passthrough` (bool, optional): Forward unmatched requests to real servers instead of returning 404
 
 #### `Inventory`
 - `EntryURL` (*string): The entry URL that was recorded

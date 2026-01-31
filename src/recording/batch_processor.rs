@@ -151,6 +151,10 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
                 brotli::BrotliDecompress(&mut std::io::Cursor::new(body), &mut decompressed)?;
                 Ok(decompressed)
             }
+            Some(ContentEncodingType::Zstd) => {
+                let decompressed = zstd::stream::decode_all(std::io::Cursor::new(body))?;
+                Ok(decompressed)
+            }
             _ => Ok(body.to_vec()),
         }
     }

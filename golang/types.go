@@ -22,6 +22,7 @@ const (
 	EncodingCompress ContentEncodingType = "compress"
 	EncodingDeflate  ContentEncodingType = "deflate"
 	EncodingBr       ContentEncodingType = "br"
+	EncodingZstd     ContentEncodingType = "zstd"
 	EncodingIdentity ContentEncodingType = "identity"
 )
 
