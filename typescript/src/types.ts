@@ -6,7 +6,7 @@ export type DeviceType = 'desktop' | 'mobile';
 /**
  * Content encoding type
  */
-export type ContentEncodingType = 'gzip' | 'compress' | 'deflate' | 'br' | 'identity';
+export type ContentEncodingType = 'gzip' | 'compress' | 'deflate' | 'br' | 'zstd' | 'identity';
 
 /**
  * HTTP headers map

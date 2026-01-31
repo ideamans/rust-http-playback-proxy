@@ -22,6 +22,7 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::ghost_server::pool::RoutingEntry;
@@ -100,17 +101,22 @@ impl GhostForwarder {
             .with_custom_certificate_verifier(Arc::new(AcceptAllCertVerifier))
             .with_no_client_auth();
 
-        // Create HTTPS connector
+        // Create HTTPS connector with connect timeout
+        let mut https_base_connector = HttpConnector::new();
+        https_base_connector.enforce_http(false); // Allow https:// URIs (build() does this internally)
+        https_base_connector.set_connect_timeout(Some(Duration::from_secs(10)));
+
         let https_connector = HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
             .enable_http1()
-            .build();
+            .wrap_connector(https_base_connector);
 
         let https_client = Client::builder(TokioExecutor::new()).build(https_connector);
 
-        // Create plain HTTP connector
-        let http_connector = HttpConnector::new();
+        // Create plain HTTP connector with connect timeout
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_connect_timeout(Some(Duration::from_secs(10)));
         let http_client = Client::builder(TokioExecutor::new()).build(http_connector);
 
         Self {
@@ -138,9 +144,14 @@ impl HttpHandler for GhostForwarder {
             let uri = req.uri().clone();
             let headers = req.headers().clone();
 
-            // Skip CONNECT requests - they are for tunnel establishment
+            // CONNECT requests must always be passed through to hudsucker's process_connect().
+            // Returning a Response here for CONNECT bypasses process_connect() and causes a
+            // protocol-level mismatch (client expects tunnel, proxy stays in HTTP/1.1 mode),
+            // leading to connection hangs. Instead, we always let hudsucker handle CONNECT
+            // via TLS interception (should_intercept defaults to true), and then handle
+            // unknown hosts at the HTTP request level after decryption.
             if method == hyper::Method::CONNECT {
-                info!("Skipping CONNECT request (tunnel): {}", uri);
+                info!("CONNECT tunnel (intercepting): {}", uri);
                 return RequestOrResponse::Request(req);
             }
 
@@ -407,7 +418,7 @@ async fn forward_to_real_server(
 
     let mut request_builder = Request::builder().method(method.clone()).uri(parsed_uri);
 
-    // Forward headers, skipping hop-by-hop headers
+    // Forward headers, skipping hop-by-hop headers and accept-encoding (will be rewritten)
     for (name, value) in original_headers.iter() {
         let name_str = name.as_str().to_lowercase();
 
@@ -424,12 +435,17 @@ async fn forward_to_real_server(
                 | "transfer-encoding"
                 | "upgrade"
                 | "proxy-connection"
+                | "accept-encoding"
         ) {
             continue;
         }
 
         request_builder = request_builder.header(name.clone(), value.clone());
     }
+
+    // Rewrite Accept-Encoding to only include supported encodings
+    request_builder =
+        request_builder.header("accept-encoding", crate::types::SUPPORTED_ACCEPT_ENCODING);
 
     let real_request = match request_builder.body(Empty::<Bytes>::new()) {
         Ok(req) => req,
@@ -447,10 +463,31 @@ async fn forward_to_real_server(
     };
 
     let use_https = scheme == "https";
+
+    // Wrap in timeout to prevent hangs when real server is unreachable
+    let timeout_duration = Duration::from_secs(3);
     let result = if use_https {
-        https_client.request(real_request).await
+        tokio::time::timeout(timeout_duration, https_client.request(real_request)).await
     } else {
-        http_client.request(real_request).await
+        tokio::time::timeout(timeout_duration, http_client.request(real_request)).await
+    };
+
+    let result = match result {
+        Ok(result) => result,
+        Err(_) => {
+            error!(
+                "Passthrough: request timed out after 3s: {} {}",
+                method, real_uri
+            );
+            let error_response = Response::builder()
+                .status(StatusCode::GATEWAY_TIMEOUT)
+                .body(Body::from(format!(
+                    "Passthrough timeout: {} {}",
+                    method, real_uri
+                )))
+                .unwrap();
+            return RequestOrResponse::Response(error_response);
+        }
     };
 
     match result {

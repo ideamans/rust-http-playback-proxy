@@ -128,6 +128,146 @@ mod tests {
         assert_eq!(result, original);
     }
 
+    #[tokio::test]
+    async fn test_decompress_zstd() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+
+        // Create zstd-compressed content
+        let original = b"Hello, World! This is zstd compressed content.";
+        let compressed = zstd::stream::encode_all(std::io::Cursor::new(original.as_slice()), 0)
+            .expect("zstd compression failed");
+
+        let result = processor
+            .decompress_body(&compressed, &Some(ContentEncodingType::Zstd))
+            .unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[tokio::test]
+    async fn test_decompress_brotli() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+
+        // Create brotli-compressed content
+        let original = b"Hello, World! This is brotli compressed content.";
+        let mut compressed = Vec::new();
+        brotli::BrotliCompress(
+            &mut std::io::Cursor::new(original.as_slice()),
+            &mut compressed,
+            &Default::default(),
+        )
+        .expect("brotli compression failed");
+
+        let result = processor
+            .decompress_body(&compressed, &Some(ContentEncodingType::Br))
+            .unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[tokio::test]
+    async fn test_decompress_deflate() {
+        use flate2::Compression;
+        use flate2::write::DeflateEncoder;
+        use std::io::Write;
+
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+
+        // Create deflate-compressed content
+        let original = b"Hello, World! This is deflate compressed content.";
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(original).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let result = processor
+            .decompress_body(&compressed, &Some(ContentEncodingType::Deflate))
+            .unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[tokio::test]
+    async fn test_decompress_identity() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+
+        let original = b"Hello, uncompressed content!";
+        let result = processor
+            .decompress_body(original, &Some(ContentEncodingType::Identity))
+            .unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[tokio::test]
+    async fn test_decompress_none_encoding() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir, mock_fs, mock_time);
+
+        let original = b"Hello, no encoding specified!";
+        let result = processor.decompress_body(original, &None).unwrap();
+        assert_eq!(result, original);
+    }
+
+    #[tokio::test]
+    async fn test_process_response_body_with_zstd_encoding() {
+        let temp_dir = TempDir::new().unwrap();
+        let inventory_dir = temp_dir.path().to_path_buf();
+
+        let mock_fs = Arc::new(MockFileSystem::new());
+        let mock_time = Arc::new(MockTimeProvider::new(1000));
+
+        let processor = RequestProcessor::new(inventory_dir.clone(), mock_fs.clone(), mock_time);
+
+        let mut resource = Resource::new(
+            "GET".to_string(),
+            "https://example.com/page.html".to_string(),
+        );
+        resource.content_encoding = Some(ContentEncodingType::Zstd);
+        resource.duration_ms = Some(100);
+
+        let html_content = b"<html><body><h1>Zstd Test</h1></body></html>";
+        let compressed = zstd::stream::encode_all(std::io::Cursor::new(html_content.as_slice()), 0)
+            .expect("zstd compression failed");
+
+        processor
+            .process_response_body(&mut resource, &compressed, Some("text/html; charset=utf-8"))
+            .await
+            .unwrap();
+
+        // Verify resource was processed correctly
+        assert_eq!(resource.content_type_mime, Some("text/html".to_string()));
+        assert_eq!(resource.content_charset, Some("utf-8".to_string()));
+        assert!(resource.content_file_path.is_some());
+        assert!(resource.minify.is_some());
+        // mbps should be calculated from compressed size
+        assert!(resource.mbps.is_some());
+    }
+
     #[test]
     fn test_convert_to_utf8() {
         let temp_dir = TempDir::new().unwrap();

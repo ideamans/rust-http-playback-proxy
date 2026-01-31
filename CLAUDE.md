@@ -224,7 +224,7 @@ make test-all
 - **HTTP Stack**: Hyper 1.0, Hyper-util, Http-body-util, Tower/Tower-http
 - **MITM Proxy**: Hudsucker 0.24 (with rcgen-ca for self-signed certificates)
 - **Serialization**: Serde + serde_json
-- **Compression**: flate2 (gzip/deflate), brotli
+- **Compression**: flate2 (gzip/deflate), brotli, zstd
 - **Encoding**: encoding_rs (charset conversion)
 - **Minify**: prettyish-html, prettify-js (beautification)
 - **CLI**: Clap 4.5 (derive features)

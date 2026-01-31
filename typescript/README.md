@@ -67,6 +67,8 @@ async function playback() {
   const proxy = await startPlayback({
     port: 8080,
     inventoryDir: './inventory',
+    fullThrottle: false, // Set true to disable timing control (TTFB and transfer speed)
+    passthrough: true,   // Forward unmatched requests to real servers instead of 404
   });
 
   console.log(`Playback proxy started on port ${proxy.port}`);
@@ -129,8 +131,10 @@ interface RecordingOptions {
 #### `PlaybackOptions`
 ```typescript
 interface PlaybackOptions {
-  port?: number;         // Optional: Port to listen on (default: 8080, will auto-search)
-  inventoryDir?: string; // Optional: Directory containing inventory (default: './inventory')
+  port?: number;           // Optional: Port to listen on (default: 8080, will auto-search)
+  inventoryDir?: string;   // Optional: Directory containing inventory (default: './inventory')
+  fullThrottle?: boolean;  // Optional: Disable timing control (TTFB and transfer speed) for fastest playback
+  passthrough?: boolean;   // Optional: Forward unmatched requests to real servers instead of 404
 }
 ```
 
@@ -153,7 +157,7 @@ interface Resource {
   statusCode?: number;
   errorMessage?: string;
   rawHeaders?: Record<string, string>;
-  contentEncoding?: ContentEncodingType;
+  contentEncoding?: ContentEncodingType; // 'gzip' | 'compress' | 'deflate' | 'br' | 'zstd' | 'identity'
   contentTypeMime?: string;
   contentCharset?: string;
   contentFilePath?: string;

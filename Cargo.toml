@@ -1,6 +1,6 @@
 [package]
 name = "http-playback-proxy"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 license = "MIT"
 authors = ["Kunihiko Miyanaga <miyanaga@ideamans.com>"]
@@ -23,6 +23,7 @@ serde_json = "1.0"
 url = "2.5"
 flate2 = "1.0"
 brotli = "7.0"
+zstd = "0.13"
 sha1 = "0.10"
 hex = "0.4"
 minifier = "0.3"

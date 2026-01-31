@@ -285,6 +285,10 @@ pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Resul
             )?;
             Ok(compressed)
         }
+        ContentEncodingType::Zstd => {
+            let compressed = zstd::stream::encode_all(std::io::Cursor::new(content), 0)?;
+            Ok(compressed)
+        }
         _ => Ok(content.to_vec()),
     }
 }

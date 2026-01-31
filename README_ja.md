@@ -75,7 +75,9 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 ```bash
 ./http-playback-proxy playback \
   --port 18080 \              # プロキシポート (デフォルト: 18080、使用中なら自動検索)
-  --inventory ./my-session    # 録画データディレクトリ (デフォルト: ./inventory)
+  --inventory ./my-session \  # 録画データディレクトリ (デフォルト: ./inventory)
+  --full-throttle \           # タイミング制御を無効にして最速で再生
+  --passthrough               # 未記録のリクエストを実サーバーに転送 (404の代わり)
 ```
 
 **再生の流れ:**
@@ -177,6 +179,8 @@ func main() {
 p, err := proxy.StartPlayback(proxy.PlaybackOptions{
     Port:         8080,
     InventoryDir: "./inventory",
+    FullThrottle: false, // trueにするとタイミング制御を無効化
+    Passthrough:  true,  // 未記録のリクエストを実サーバーに転送
 })
 if err != nil {
     panic(err)
@@ -256,6 +260,8 @@ async function playback() {
   const proxy = await startPlayback({
     port: 8080,
     inventoryDir: './inventory',
+    fullThrottle: false, // trueにするとタイミング制御を無効化
+    passthrough: true,   // 未記録のリクエストを実サーバーに転送
   });
 
   console.log(`Playback proxy started on port ${proxy.port}`);
@@ -299,7 +305,7 @@ for (const [i, resource] of inventory.resources.entries()) {
 - **HTTPスタック**: Hyper 1.0, Hyper-util, Tower/Tower-http
 - **MITM Proxy**: Hudsucker 0.24 + rcgen-caで自己署名証明書
 - **コンテンツ処理**: 自動Beautify化 (prettyish-html, prettify-js)
-- **圧縮**: gzip, deflate, brotli対応 (flate2, brotliクレート)
+- **圧縮**: gzip, deflate, brotli, zstd対応 (flate2, brotli, zstdクレート)
 - **エンコーディング**: 文字セット検出とUTF-8変換 (encoding_rs)
 
 ### データ構造

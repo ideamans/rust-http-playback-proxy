@@ -16,6 +16,10 @@ mod types_tests {
         let br = ContentEncodingType::Br;
         let json = serde_json::to_string(&br).unwrap();
         assert_eq!(json, "\"br\"");
+
+        let zstd = ContentEncodingType::Zstd;
+        let json = serde_json::to_string(&zstd).unwrap();
+        assert_eq!(json, "\"zstd\"");
     }
 
     #[test]
@@ -25,6 +29,9 @@ mod types_tests {
 
         let deflate: ContentEncodingType = serde_json::from_str("\"deflate\"").unwrap();
         assert_eq!(deflate, ContentEncodingType::Deflate);
+
+        let zstd: ContentEncodingType = serde_json::from_str("\"zstd\"").unwrap();
+        assert_eq!(zstd, ContentEncodingType::Zstd);
     }
 
     #[test]
@@ -38,11 +45,74 @@ mod types_tests {
             ContentEncodingType::Br
         );
         assert_eq!(
+            ContentEncodingType::from_str("zstd").unwrap(),
+            ContentEncodingType::Zstd
+        );
+        assert_eq!(
             ContentEncodingType::from_str("identity").unwrap(),
             ContentEncodingType::Identity
         );
 
         assert!(ContentEncodingType::from_str("invalid").is_err());
+    }
+
+    #[test]
+    fn test_content_encoding_zstd_roundtrip() {
+        // Verify zstd serializes and deserializes correctly through JSON
+        let original = ContentEncodingType::Zstd;
+        let json = serde_json::to_string(&original).unwrap();
+        assert_eq!(json, "\"zstd\"");
+        let deserialized: ContentEncodingType = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ContentEncodingType::Zstd);
+    }
+
+    #[test]
+    fn test_content_encoding_from_str_case_insensitive() {
+        // Verify all encodings work case-insensitively
+        assert_eq!(
+            ContentEncodingType::from_str("ZSTD").unwrap(),
+            ContentEncodingType::Zstd
+        );
+        assert_eq!(
+            ContentEncodingType::from_str("Zstd").unwrap(),
+            ContentEncodingType::Zstd
+        );
+        assert_eq!(
+            ContentEncodingType::from_str("zStD").unwrap(),
+            ContentEncodingType::Zstd
+        );
+    }
+
+    #[test]
+    fn test_supported_accept_encoding_constant() {
+        use crate::types::SUPPORTED_ACCEPT_ENCODING;
+
+        // Verify the constant contains all expected encodings
+        assert!(SUPPORTED_ACCEPT_ENCODING.contains("gzip"));
+        assert!(SUPPORTED_ACCEPT_ENCODING.contains("deflate"));
+        assert!(SUPPORTED_ACCEPT_ENCODING.contains("br"));
+        assert!(SUPPORTED_ACCEPT_ENCODING.contains("zstd"));
+
+        // Verify it does NOT contain unsupported encodings
+        assert!(!SUPPORTED_ACCEPT_ENCODING.contains("compress"));
+        assert!(!SUPPORTED_ACCEPT_ENCODING.contains("identity"));
+    }
+
+    #[test]
+    fn test_resource_with_zstd_encoding() {
+        // Verify a resource with zstd encoding serializes/deserializes correctly
+        let mut resource = Resource::new("GET".to_string(), "https://example.com".to_string());
+        resource.content_encoding = Some(ContentEncodingType::Zstd);
+        resource.status_code = Some(200);
+
+        let json = serde_json::to_string(&resource).unwrap();
+        assert!(json.contains("\"contentEncoding\":\"zstd\""));
+
+        let deserialized: Resource = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            deserialized.content_encoding,
+            Some(ContentEncodingType::Zstd)
+        );
     }
 
     #[test]

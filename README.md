@@ -75,7 +75,9 @@ curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/d
 ```bash
 ./http-playback-proxy playback \
   --port 18080 \              # Proxy port (default: 18080, auto-search if occupied)
-  --inventory ./my-session    # Recorded data directory (default: ./inventory)
+  --inventory ./my-session \  # Recorded data directory (default: ./inventory)
+  --full-throttle \           # Disable timing control for fastest playback
+  --passthrough               # Forward unmatched requests to real servers instead of 404
 ```
 
 **Playback workflow:**
@@ -177,6 +179,8 @@ func main() {
 p, err := proxy.StartPlayback(proxy.PlaybackOptions{
     Port:         8080,
     InventoryDir: "./inventory",
+    FullThrottle: false, // Set true to disable timing control
+    Passthrough:  true,  // Forward unmatched requests to real servers
 })
 if err != nil {
     panic(err)
@@ -256,6 +260,8 @@ async function playback() {
   const proxy = await startPlayback({
     port: 8080,
     inventoryDir: './inventory',
+    fullThrottle: false, // Set true to disable timing control
+    passthrough: true,   // Forward unmatched requests to real servers
   });
 
   console.log(`Playback proxy started on port ${proxy.port}`);
@@ -299,7 +305,7 @@ See [typescript/README.md](typescript/README.md) for full API documentation.
 - **HTTP Stack**: Hyper 1.0, Hyper-util, Tower/Tower-http
 - **MITM Proxy**: Hudsucker 0.24 with rcgen-ca for self-signed certificates
 - **Content Processing**: Automatic beautification (prettyish-html, prettify-js)
-- **Compression**: gzip, deflate, brotli support (flate2, brotli crates)
+- **Compression**: gzip, deflate, brotli, zstd support (flate2, brotli, zstd crates)
 - **Encoding**: Charset detection and UTF-8 conversion (encoding_rs)
 
 ### Data Structure
