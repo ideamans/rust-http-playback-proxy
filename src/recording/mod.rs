@@ -15,6 +15,7 @@ mod processor_tests;
 
 pub async fn run_recording_mode(
     entry_url: Option<String>,
+    extra_urls: Option<Vec<String>>,
     port: Option<u16>,
     device: DeviceType,
     inventory_dir: PathBuf,
@@ -29,8 +30,15 @@ pub async fn run_recording_mode(
         println!("Entry URL: {}", url);
     }
 
+    if let Some(urls) = &extra_urls {
+        for url in urls {
+            println!("Extra URL: {}", url);
+        }
+    }
+
     let mut inventory = Inventory::new();
     inventory.entry_url = entry_url.clone();
+    inventory.extra_urls = extra_urls;
     inventory.device_type = Some(device);
 
     proxy::start_recording_proxy(port, inventory, inventory_dir).await

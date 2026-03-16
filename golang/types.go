@@ -48,6 +48,7 @@ type Resource struct {
 // Inventory represents the complete inventory of recorded resources
 type Inventory struct {
 	EntryURL   *string     `json:"entryUrl,omitempty"`
+	ExtraURLs  []string    `json:"extraUrls,omitempty"`
 	DeviceType *DeviceType `json:"deviceType,omitempty"`
 	Resources  []Resource  `json:"resources"`
 }

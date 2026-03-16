@@ -35,6 +35,13 @@ pub enum Commands {
             help = "Inventory directory"
         )]
         inventory: PathBuf,
+
+        #[arg(
+            short = 'e',
+            long = "extra-url",
+            help = "Additional entry URLs (can be specified multiple times)"
+        )]
+        extra_urls: Vec<String>,
     },
 
     #[command(about = "Playback recorded HTTP traffic")]

@@ -166,6 +166,8 @@ pub struct Inventory {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra_urls: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub device_type: Option<DeviceType>,
     pub resources: Vec<Resource>,
 }
@@ -219,6 +221,7 @@ impl Inventory {
     pub fn new() -> Self {
         Self {
             entry_url: None,
+            extra_urls: None,
             device_type: None,
             resources: Vec::new(),
         }

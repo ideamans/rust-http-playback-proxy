@@ -246,6 +246,13 @@ export async function startRecording(options: RecordingOptions): Promise<Proxy> 
   // Add inventory directory
   args.push('--inventory', inventoryDir);
 
+  // Add extra URLs
+  if (options.extraUrls) {
+    for (const url of options.extraUrls) {
+      args.push('--extra-url', url);
+    }
+  }
+
   // Start the process
   const spawnOptions: any = {
     stdio: ['ignore', 'inherit', 'inherit'],

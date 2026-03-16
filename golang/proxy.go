@@ -36,6 +36,7 @@ type Proxy struct {
 // RecordingOptions holds options for starting a recording proxy
 type RecordingOptions struct {
 	EntryURL     string     // Optional: Entry URL to start recording from
+	ExtraURLs    []string   // Optional: Additional entry URLs
 	Port         int        // Optional: Port to use (0 = auto-detect)
 	DeviceType   DeviceType // Optional: Device type (default: mobile)
 	InventoryDir string     // Optional: Inventory directory (default: ./inventory)
@@ -129,6 +130,11 @@ func StartRecording(opts RecordingOptions) (*Proxy, error) {
 
 	// Add inventory directory
 	args = append(args, "--inventory", inventoryDir)
+
+	// Add extra URLs
+	for _, url := range opts.ExtraURLs {
+		args = append(args, "--extra-url", url)
+	}
 
 	cmd := exec.CommandContext(ctx, binaryPath, args...)
 	cmd.Stdout = os.Stdout
