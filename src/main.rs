@@ -25,13 +25,22 @@ async fn main() -> anyhow::Result<()> {
             device,
             inventory,
             extra_urls,
+            exclude_patterns,
         } => {
             let extra = if extra_urls.is_empty() {
                 None
             } else {
                 Some(extra_urls)
             };
-            recording::run_recording_mode(entry_url, extra, port, device, inventory).await?;
+            recording::run_recording_mode(
+                entry_url,
+                extra,
+                port,
+                device,
+                inventory,
+                exclude_patterns,
+            )
+            .await?;
         }
         Commands::Playback {
             port,

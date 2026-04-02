@@ -10,6 +10,8 @@ use std::time::Instant;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+use regex::Regex;
+
 use crate::types::Inventory;
 use crate::types::Resource;
 
@@ -39,16 +41,19 @@ pub struct RecordingHandler {
     // Track already-recorded (method, url) pairs to skip duplicates
     // Only the first response for each method+URL is recorded
     recorded_resources: Arc<Mutex<HashSet<(String, String)>>>,
+    // Regex patterns for excluding URLs from recording
+    exclude_patterns: Arc<Vec<Regex>>,
 }
 
 impl RecordingHandler {
-    pub fn new(inventory: Inventory) -> Self {
+    pub fn new(inventory: Inventory, exclude_patterns: Vec<Regex>) -> Self {
         Self {
             shared_inventory: Arc::new(Mutex::new(inventory)),
             start_time: Arc::new(Instant::now()),
             request_infos: Arc::new(Mutex::new(HashMap::new())),
             request_counter: Arc::new(Mutex::new(0)),
             recorded_resources: Arc::new(Mutex::new(HashSet::new())),
+            exclude_patterns: Arc::new(exclude_patterns),
         }
     }
 
@@ -71,6 +76,7 @@ impl HttpHandler for RecordingHandler {
         let start_time = Arc::clone(&self.start_time);
         let request_infos = Arc::clone(&self.request_infos);
         let request_counter = Arc::clone(&self.request_counter);
+        let exclude_patterns = Arc::clone(&self.exclude_patterns);
 
         async move {
             // Generate unique request ID
@@ -112,6 +118,15 @@ impl HttpHandler for RecordingHandler {
                     uri.to_string()
                 }
             };
+
+            // Check if URL matches any exclude pattern
+            if exclude_patterns.iter().any(|re| re.is_match(&url)) {
+                info!(
+                    "Excluding request (matched exclude pattern): {} {}",
+                    method, url
+                );
+                return RequestOrResponse::Request(req);
+            }
 
             // Store request information for correlation with response
             // With ideamans-hudsucker 0.25+, we can use (client_addr, method, url) as unique key
@@ -158,10 +173,20 @@ impl HttpHandler for RecordingHandler {
         let request_infos = Arc::clone(&self.request_infos);
         let shared_inventory = Arc::clone(&self.shared_inventory);
         let recorded_resources = Arc::clone(&self.recorded_resources);
+        let exclude_patterns = Arc::clone(&self.exclude_patterns);
 
         async move {
             let method_str = request_method.to_string();
             let url = request_uri.to_string();
+
+            // Skip if URL matches any exclude pattern
+            if exclude_patterns.iter().any(|re| re.is_match(&url)) {
+                info!(
+                    "Excluding response (matched exclude pattern): {} {}",
+                    method_str, url
+                );
+                return res;
+            }
 
             // Skip if we already have a recording for this method+URL.
             // Only the first response is meaningful; subsequent ones (e.g. 304 Not Modified

@@ -42,6 +42,13 @@ pub enum Commands {
             help = "Additional entry URLs (can be specified multiple times)"
         )]
         extra_urls: Vec<String>,
+
+        #[arg(
+            short = 'x',
+            long = "exclude",
+            help = "Regex patterns to exclude URLs from recording (can be specified multiple times)"
+        )]
+        exclude_patterns: Vec<String>,
     },
 
     #[command(about = "Playback recorded HTTP traffic")]

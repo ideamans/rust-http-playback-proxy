@@ -20,6 +20,7 @@ pub async fn start_recording_proxy(
     port: u16,
     inventory: Inventory,
     inventory_dir: PathBuf,
+    exclude_patterns: Vec<regex::Regex>,
 ) -> Result<()> {
     info!("Starting HTTPS MITM recording proxy on port {}", port);
 
@@ -44,7 +45,7 @@ pub async fn start_recording_proxy(
     let ca = RcgenAuthority::new(issuer, 1_000, aws_lc_rs::default_provider());
 
     // Create the recording handler
-    let handler = RecordingHandler::new(inventory);
+    let handler = RecordingHandler::new(inventory, exclude_patterns);
     let handler_inventory = handler.get_inventory();
 
     // Build the proxy with standard TLS configuration
