@@ -60,10 +60,7 @@ fn write_command(out: &mut String, prefix: &str, cmd: &Command) -> anyhow::Resul
         write!(out, "\n```\n{full} {}\n```\n", positionals.join(" "))?;
     }
 
-    let mut opts: Vec<_> = cmd
-        .get_opts()
-        .filter(|a| !a.is_hide_set())
-        .collect();
+    let mut opts: Vec<_> = cmd.get_opts().filter(|a| !a.is_hide_set()).collect();
     opts.sort_by_key(|a| a.get_id().as_str().to_string());
     if !opts.is_empty() {
         out.push_str("\n| flag | default | description |\n| --- | --- | --- |\n");
@@ -84,8 +81,16 @@ fn write_command(out: &mut String, prefix: &str, cmd: &Command) -> anyhow::Resul
                 .get_help()
                 .map(|h| h.to_string().replace('|', "\\|"))
                 .unwrap_or_default();
-            let required = if a.is_required_set() { " **(required)**" } else { "" };
-            writeln!(out, "| {} | {default} | {help}{required} |", names.join(", "))?;
+            let required = if a.is_required_set() {
+                " **(required)**"
+            } else {
+                ""
+            };
+            writeln!(
+                out,
+                "| {} | {default} | {help}{required} |",
+                names.join(", ")
+            )?;
         }
     }
 

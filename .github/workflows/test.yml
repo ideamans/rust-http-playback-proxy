@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - develop
+  # Without this the unit tests, the reference drift check and the plugin
+  # validation never run on a pull request — the guards exist but nothing
+  # triggers them.
+  pull_request:
 
 jobs:
   test:
