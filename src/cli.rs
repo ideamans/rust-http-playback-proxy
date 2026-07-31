@@ -53,7 +53,11 @@ pub enum Commands {
 
     #[command(about = "Print the reference for AI agents embedded in this binary")]
     Llm {
-        #[arg(long, default_value = "markdown", help = "Output format: markdown or json")]
+        #[arg(
+            long,
+            default_value = "markdown",
+            help = "Output format: markdown or json"
+        )]
         format: String,
 
         #[arg(

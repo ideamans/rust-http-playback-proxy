@@ -37,10 +37,10 @@ fn frontmatter(body: &str) -> Vec<(String, String)> {
         if line == "---" {
             return out;
         }
-        if let Some((k, v)) = line.split_once(':') {
-            if !k.starts_with(char::is_whitespace) {
-                out.push((k.trim().to_string(), v.trim().to_string()));
-            }
+        if let Some((k, v)) = line.split_once(':')
+            && !k.starts_with(char::is_whitespace)
+        {
+            out.push((k.trim().to_string(), v.trim().to_string()));
         }
     }
     panic!("SKILL.md frontmatter is not terminated by ---");
@@ -57,7 +57,10 @@ fn plugin_manifest_version_matches_crate() {
         env!("CARGO_PKG_VERSION"),
         "plugin.json version must match the crate version in Cargo.toml"
     );
-    assert_eq!(manifest["name"].as_str().unwrap(), "rust-http-playback-proxy");
+    assert_eq!(
+        manifest["name"].as_str().unwrap(),
+        "rust-http-playback-proxy"
+    );
 }
 
 #[test]
@@ -91,7 +94,10 @@ fn skills_follow_the_agent_skills_standard() {
         };
         let name = get("name");
         assert_eq!(name, dir_name, "name must match the directory name");
-        assert!(!get("description").is_empty(), "{dir_name}: description is required");
+        assert!(
+            !get("description").is_empty(),
+            "{dir_name}: description is required"
+        );
         assert!(
             !get("compatibility").is_empty(),
             "{dir_name}: compatibility should state what the skill needs"
@@ -104,7 +110,10 @@ fn skills_follow_the_agent_skills_standard() {
         seen += 1;
     }
 
-    assert!(seen >= 2, "expected at least a usage and an install skill, found {seen}");
+    assert!(
+        seen >= 2,
+        "expected at least a usage and an install skill, found {seen}"
+    );
     assert!(
         has_install,
         "no *-install skill: users whose PATH lacks the CLI have no way forward"
