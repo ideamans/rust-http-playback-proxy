@@ -7,7 +7,25 @@ on:
   workflow_dispatch:  # Allow manual trigger for testing
 
 jobs:
+  # plugin.json's version feeds the Claude Code plugin, which users install
+  # independently of the binary. A tag that disagrees with the crate version
+  # would publish a plugin claiming a version the binary never had.
+  verify-version:
+    name: Verify the tag matches the crate version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          tag="${GITHUB_REF_NAME#v}"
+          declared=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          plugin=$(grep -m1 '"version"' plugins/rust-http-playback-proxy/.claude-plugin/plugin.json | cut -d'"' -f4)
+          if [ "$tag" != "$declared" ] || [ "$plugin" != "$declared" ]; then
+            echo "::error::tag=$tag Cargo.toml=$declared plugin.json=$plugin must all agree"
+            exit 1
+          fi
+
   build-matrix:
+    needs: verify-version
     name: Build ${{ matrix.platform }}
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:

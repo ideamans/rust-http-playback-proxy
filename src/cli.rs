@@ -51,6 +51,19 @@ pub enum Commands {
         exclude_patterns: Vec<String>,
     },
 
+    #[command(about = "Print the reference for AI agents embedded in this binary")]
+    Llm {
+        #[arg(long, default_value = "markdown", help = "Output format: markdown or json")]
+        format: String,
+
+        #[arg(
+            long,
+            hide = true,
+            help = "Regenerate llmdocs/90-commands.md from this clap definition (development only)"
+        )]
+        regenerate: bool,
+    },
+
     #[command(about = "Playback recorded HTTP traffic")]
     Playback {
         #[arg(

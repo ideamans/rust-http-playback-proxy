@@ -512,3 +512,43 @@ await proxy.stop();  // Uses SIGTERM directly
 ```
 
 For detailed design rationale and cross-platform implementation details, see [SIGNAL.md](SIGNAL.md).
+
+## Updating the AI-facing layer
+
+**Added a subcommand or flag, changed the recording/playback contract —
+update all three before finishing.**
+
+| Update | Where |
+| --- | --- |
+| ① Documentation | `README.md` |
+| ② Help text | the clap definitions in `src/cli.rs` |
+| ③ **LLM knowledge** | `llmdocs/00-guide.md` |
+| | `llmdocs/90-commands.md` — **generated, never hand-edit** → `cargo run --bin http-playback-proxy -- llm --regenerate` |
+| | `plugins/rust-http-playback-proxy/skills/*/SKILL.md` |
+| | `context7.json` `rules` |
+
+③ is the one that rots. Stale docs and stale `--help` get noticed by a human
+reading them; **stale LLM knowledge is noticed by nobody** — the agent just
+quietly gets it wrong.
+
+### This is the only Rust CLI in the family
+
+`go-llm-cli-kit` is Go-only, so three pieces are reimplemented here with no
+upstream to inherit fixes from: `src/llm.rs` (renderer and output contract),
+`src/llmgen.rs` (clap equivalent of the cobra catalog generator) and
+`tests/plugin_skills.rs` (skillcheck equivalent). If the standard changes,
+update them by hand and keep the output contract identical to the Go CLIs —
+Markdown by default, `--format json` yielding `{file, title, body}` objects.
+
+`--bin http-playback-proxy` is required on every cargo invocation: the crate
+builds two binaries.
+
+Chapters are embedded with `include_str!`, so `llmdocs/90-commands.md` must
+exist at build time. That is why it is committed, and why CI regenerates it
+and fails on a dirty tree.
+
+The crate version, `plugin.json`'s version and the release tag must all agree
+— `tests/plugin_skills.rs` checks the first two and the release workflow
+checks all three.
+
+Standard: <https://github.com/ideamans/go-llm-cli-kit/blob/main/LLM.md>
