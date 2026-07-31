@@ -52,6 +52,23 @@ jobs:
 
       - name: Run clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+      # llmdocs/90-commands.md is committed because include_str! needs a real
+      # file at build time, so the guard against drift is regenerating it here.
+      - name: Regenerate the embedded command catalog
+        run: cargo run --bin http-playback-proxy -- llm --regenerate
+
+      - name: Fail if the committed reference is stale
+        run: |
+          if ! git diff --exit-code -- llmdocs; then
+            echo "::error::llmdocs is out of date. Run 'cargo run --bin http-playback-proxy -- llm --regenerate' and commit the result."
+            exit 1
+          fi
+
+      - name: Verify the llm subcommand renders
+        run: |
+          cargo run --bin http-playback-proxy -- llm | head -5
+          cargo run --bin http-playback-proxy -- llm --format json | head -5
+
 
       - name: Run tests
         run: cargo test

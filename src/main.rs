@@ -3,6 +3,8 @@ use clap::Parser;
 mod beautify;
 mod cli;
 mod ghost_server;
+mod llm;
+mod llmgen;
 mod playback;
 mod recording;
 mod signal_sender;
@@ -19,6 +21,13 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Llm { format, regenerate } => {
+            if regenerate {
+                llmgen::regenerate()?;
+            } else {
+                print!("{}", llm::render(&format)?);
+            }
+        }
         Commands::Recording {
             entry_url,
             port,

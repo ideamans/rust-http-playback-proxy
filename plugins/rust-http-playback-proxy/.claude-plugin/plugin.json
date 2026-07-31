@@ -1,0 +1,13 @@
+{
+  "name": "rust-http-playback-proxy",
+  "description": "Adds /http-playback-proxy-usage and /http-playback-proxy-install skills for recording a web page's HTTP traffic and replaying it with the original timing, so page-speed work can be measured against a target that does not change between runs.",
+  "version": "0.10.0",
+  "author": {
+    "name": "Ideamans Inc.",
+    "email": "support@ideamans.com"
+  },
+  "homepage": "https://github.com/ideamans/rust-http-playback-proxy",
+  "repository": "https://github.com/ideamans/rust-http-playback-proxy",
+  "license": "MIT",
+  "keywords": ["proxy", "http", "recording", "playback", "web-performance", "deterministic", "mitm", "cli"]
+}

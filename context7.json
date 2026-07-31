@@ -1,0 +1,20 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "http-playback-proxy",
+  "description": "MITM proxy that records a web page's HTTP traffic into a local inventory and replays it reproducing the original timing, giving page-speed work a target that does not change between runs.",
+  "folders": ["llmdocs"],
+  "excludeFolders": ["target", "node_modules", "dist"],
+  "rules": [
+    "Record before playback. `playback` serves whatever is in the inventory directory and has nothing to serve without a recording.",
+    "The inventory directory (-i, default ./inventory) is the artifact. Use the same path for recording and playback, and keep it — it is what makes a later run comparable.",
+    "Playback reproduces the original TTFB and transfer speed by default. That is the point of the tool.",
+    "--full-throttle removes timing reproduction. The replay gets fast and the numbers stop being comparable to a real load; use it only for smoke tests.",
+    "Unmatched requests return 404 by default, deliberately. --passthrough forwards them to the network instead, which reintroduces the nondeterminism the tool exists to remove.",
+    "Recording drives a browser through a MITM proxy and reaches the real site, so requests come from wherever it runs.",
+    "HTTPS recording requires the client to trust the proxy's certificate.",
+    "-x/--exclude takes repeatable regex patterns; use it to drop analytics and ad beacons, which add third-party latency unrelated to the site.",
+    "The `signal` subcommand is a hidden internal helper for Windows process control and is not part of the workflow.",
+    "This tool produces no measurements. It provides a stable target; measure with Lighthouse, loadshow or a browser pointed at the proxy.",
+    "Built with Cargo, not goreleaser, so release asset names follow Rust target triples rather than the usual os_arch pattern. The crate builds two binaries, so cargo build needs --bin http-playback-proxy."
+  ]
+}
