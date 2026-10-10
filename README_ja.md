@@ -22,17 +22,13 @@
 
 ### ビルド済みバイナリの使用
 
-[GitHub Releases](https://github.com/pagespeed-quest/http-playback-proxy/releases)からダウンロード：
+[GitHub Releases](https://github.com/ideamans/rust-http-playback-proxy/releases)からダウンロード：
 
 ```bash
-# macOS ARM64
-curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/download/http-playback-proxy-darwin-arm64.tar.gz | tar xz
-
-# Linux x86_64
-curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/download/http-playback-proxy-linux-amd64.tar.gz | tar xz
-
-# Windows x86_64
-# http-playback-proxy-windows-amd64.zipをダウンロードして展開
+VERSION=v0.11.1   # 最新版は Releases ページで確認
+# macOS (Apple Silicon) / Linux x86_64 / Linux ARM64 / Windows x86_64
+PLATFORM=darwin-arm64   # または linux-amd64、linux-arm64、windows-amd64
+curl -L https://github.com/ideamans/rust-http-playback-proxy/releases/download/$VERSION/http-playback-proxy-$VERSION-$PLATFORM.tar.gz | tar xz
 ```
 
 ### コマンドライン使用方法
@@ -449,7 +445,6 @@ make test-typescript          # TypeScriptラッパーのみ
 
 対応プラットフォーム:
 - darwin-arm64 (macOS Apple Silicon)
-- darwin-amd64 (macOS Intel)
 - linux-amd64 (Linux x86_64)
 - linux-arm64 (Linux ARM64)
 - windows-amd64 (Windows x86_64)

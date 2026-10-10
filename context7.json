@@ -23,6 +23,7 @@
     "HTTPS recording requires the client to trust the proxy's certificate.",
     "-x/--exclude takes repeatable regex patterns; use it to drop analytics and ad beacons, which add third-party latency unrelated to the site.",
     "The `signal` subcommand is a hidden internal helper for Windows process control and is not part of the workflow.",
+    "Prebuilt binaries exist for darwin-arm64, linux-amd64, linux-arm64 and windows-amd64, as `http-playback-proxy-<tag>-<platform>.tar.gz` on the ideamans/rust-http-playback-proxy Releases page. Intel Macs (darwin-amd64) are not supported: the npm and Go wrappers refuse to start there.",
     "This tool produces no measurements. It provides a stable target; measure with Lighthouse, loadshow or a browser pointed at the proxy.",
     "Built with Cargo, not goreleaser, so release asset names follow Rust target triples rather than the usual os_arch pattern. The crate builds two binaries, so cargo build needs --bin http-playback-proxy."
   ]

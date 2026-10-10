@@ -46,9 +46,11 @@ curl -fsSL "https://api.github.com/repos/ideamans/rust-http-playback-proxy/relea
   | grep '"name"' | grep -E 'tar.gz|zip'
 ```
 
-Rust release assets are usually named by target triple — `x86_64-apple-darwin`,
-`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu` and so on. Pick the one
-matching `uname -s` / `uname -m`, download it, and unpack.
+Assets are named `http-playback-proxy-<tag>-<platform>.tar.gz`, where
+`<platform>` is `darwin-arm64`, `linux-amd64`, `linux-arm64` or
+`windows-amd64` (the archive holds `http-playback-proxy.exe`). Pick the one
+matching `uname -s` / `uname -m`, download it, and unpack. **Intel Macs are not
+supported** — there is no `darwin-amd64` build.
 
 ### Install onto PATH
 
