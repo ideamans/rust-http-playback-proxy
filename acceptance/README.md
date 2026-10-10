@@ -69,7 +69,6 @@ These tests are automatically run by GitHub Actions when:
 The workflow runs tests on multiple platforms:
 - Ubuntu (linux-amd64)
 - macOS ARM64 (darwin-arm64)
-- macOS Intel (darwin-amd64)
 - Windows (windows-amd64)
 
 ## How It Works

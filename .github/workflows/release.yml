@@ -40,6 +40,10 @@ jobs:
           - os: ubuntu-24.04-arm
             platform: linux-arm64
             target: aarch64-unknown-linux-gnu
+          - os: windows-latest
+            platform: windows-amd64
+            target: x86_64-pc-windows-msvc
+          # No darwin-amd64: Intel Macs are not supported
 
     runs-on: ${{ matrix.os }}
 
@@ -76,9 +80,11 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare binary
+        shell: bash
         run: |
           mkdir -p release-${{ matrix.platform }}
-          cp target/${{ matrix.target }}/release/http-playback-proxy release-${{ matrix.platform }}/
+          if [ "${{ matrix.platform }}" = "windows-amd64" ]; then BIN=http-playback-proxy.exe; else BIN=http-playback-proxy; fi
+          cp target/${{ matrix.target }}/release/$BIN release-${{ matrix.platform }}/
           cd release-${{ matrix.platform }}
           tar czf ../http-playback-proxy-${{ github.ref_name }}-${{ matrix.platform }}.tar.gz .
           cd ..

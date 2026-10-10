@@ -427,7 +427,6 @@ Multi-platform build and release process using GitHub Actions:
 1. **Create version tag**: `git tag v0.0.0 && git push origin v0.0.0`
 2. **GitHub Actions builds** binaries for all platforms:
    - darwin-arm64 (macOS Apple Silicon)
-   - darwin-amd64 (macOS Intel)
    - linux-amd64 (Linux x86_64)
    - linux-arm64 (Linux ARM64)
    - windows-amd64 (Windows x86_64)

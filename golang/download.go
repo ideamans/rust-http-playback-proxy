@@ -10,12 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
 const (
-	githubUser = "pagespeed-quest"
-	githubRepo = "http-playback-proxy"
+	githubUser = "ideamans"
+	githubRepo = "rust-http-playback-proxy"
 	baseURL    = "https://github.com/" + githubUser + "/" + githubRepo + "/releases/download"
 
 	// Default download timeout
@@ -27,8 +28,6 @@ func getPlatform() string {
 	platform := runtime.GOOS + "-" + runtime.GOARCH
 	// Normalize platform strings
 	switch platform {
-	case "darwin-amd64":
-		return "darwin-amd64"
 	case "darwin-arm64":
 		return "darwin-arm64"
 	case "linux-amd64":
@@ -40,6 +39,19 @@ func getPlatform() string {
 	default:
 		return platform
 	}
+}
+
+// supportedPlatforms are the platforms a release builds a binary for.
+// Intel Macs (darwin-amd64) are not among them.
+var supportedPlatforms = []string{"darwin-arm64", "linux-amd64", "linux-arm64", "windows-amd64"}
+
+func isSupportedPlatform(platform string) bool {
+	for _, p := range supportedPlatforms {
+		if p == platform {
+			return true
+		}
+	}
+	return false
 }
 
 // getBinaryName returns the expected binary name for the current platform
@@ -262,6 +274,10 @@ func DownloadBinary(version string) error {
 // This is the recommended way to initialize the library.
 // Returns an error if the binary cannot be found or downloaded.
 func EnsureBinary() error {
+	if !isSupportedPlatform(getPlatform()) {
+		return fmt.Errorf("unsupported platform %s: binaries are built for %s", getPlatform(), strings.Join(supportedPlatforms, ", "))
+	}
+
 	if checkBinaryExists() {
 		return nil
 	}

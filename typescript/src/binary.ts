@@ -6,8 +6,8 @@ import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import * as tar from 'tar';
 
-const GITHUB_USER = 'pagespeed-quest';
-const GITHUB_REPO = 'http-playback-proxy';
+const GITHUB_USER = 'ideamans';
+const GITHUB_REPO = 'rust-http-playback-proxy';
 const BASE_URL = `https://github.com/${GITHUB_USER}/${GITHUB_REPO}/releases/download`;
 
 /**
@@ -31,7 +31,8 @@ export function getPlatform(): string {
   const arch = process.arch;
 
   if (platform === 'darwin') {
-    return arch === 'arm64' ? 'darwin-arm64' : 'darwin-amd64';
+    if (arch === 'arm64') return 'darwin-arm64';
+    throw new Error('Intel Macs (darwin-x64) are not supported; use an Apple Silicon Mac, Linux or Windows');
   } else if (platform === 'linux') {
     return arch === 'arm64' ? 'linux-arm64' : 'linux-amd64';
   } else if (platform === 'win32') {

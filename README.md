@@ -22,17 +22,13 @@ An MITM HTTP/HTTPS proxy for recording and replaying web traffic with precise ti
 
 ### Using Pre-built Binaries
 
-Download from [GitHub Releases](https://github.com/pagespeed-quest/http-playback-proxy/releases):
+Download from [GitHub Releases](https://github.com/ideamans/rust-http-playback-proxy/releases):
 
 ```bash
-# macOS ARM64
-curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/download/http-playback-proxy-darwin-arm64.tar.gz | tar xz
-
-# Linux x86_64
-curl -L https://github.com/pagespeed-quest/http-playback-proxy/releases/latest/download/http-playback-proxy-linux-amd64.tar.gz | tar xz
-
-# Windows x86_64
-# Download http-playback-proxy-windows-amd64.zip and extract
+VERSION=v0.11.1   # see the Releases page for the latest
+# macOS (Apple Silicon) / Linux x86_64 / Linux ARM64 / Windows x86_64
+PLATFORM=darwin-arm64   # or linux-amd64, linux-arm64, windows-amd64
+curl -L https://github.com/ideamans/rust-http-playback-proxy/releases/download/$VERSION/http-playback-proxy-$VERSION-$PLATFORM.tar.gz | tar xz
 ```
 
 ### Command Line Usage
@@ -449,7 +445,6 @@ Multi-platform automated release:
 
 Supported platforms:
 - darwin-arm64 (macOS Apple Silicon)
-- darwin-amd64 (macOS Intel)
 - linux-amd64 (Linux x86_64)
 - linux-arm64 (Linux ARM64)
 - windows-amd64 (Windows x86_64)
