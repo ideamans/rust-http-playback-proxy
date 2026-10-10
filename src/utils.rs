@@ -1,5 +1,11 @@
 use anyhow::Result;
 use sha1::{Digest, Sha1};
+
+/// Lower-case hex SHA-256 of `data`.
+pub fn sha256_hex(data: &[u8]) -> String {
+    use sha2::Sha256;
+    hex::encode(Sha256::digest(data))
+}
 use std::net::TcpListener;
 use url::Url;
 

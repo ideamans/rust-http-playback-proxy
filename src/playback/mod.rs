@@ -17,6 +17,9 @@ mod transaction_tests;
 #[cfg(test)]
 mod inventory_tests;
 
+#[cfg(test)]
+mod accuracy_tests;
+
 pub async fn run_playback_mode(
     port: Option<u16>,
     inventory_dir: PathBuf,

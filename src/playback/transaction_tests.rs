@@ -148,8 +148,12 @@ mod tests {
     fn test_minify_html_content() {
         let html_with_whitespace = b"<html>\n  <head>\n    <title>Test</title>\n  </head>\n  <body>\n    <h1>Hello</h1>\n  </body>\n</html>";
 
-        let minified =
-            minify_content(html_with_whitespace, &Some("text/html".to_string())).unwrap();
+        // The legacy format's textual HTML minifier (the current format never rewrites HTML)
+        let minified = crate::playback::transaction::legacy_minify_content(
+            html_with_whitespace,
+            &Some("text/html".to_string()),
+        )
+        .unwrap();
         let minified_str = String::from_utf8(minified).unwrap();
 
         // Should be more compact

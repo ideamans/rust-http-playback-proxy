@@ -2,12 +2,21 @@
   "$schema": "https://context7.com/schema/context7.json",
   "projectTitle": "http-playback-proxy",
   "description": "MITM proxy that records a web page's HTTP traffic into a local inventory and replays it reproducing the original timing, giving page-speed work a target that does not change between runs.",
-  "folders": ["llmdocs"],
-  "excludeFolders": ["target", "node_modules", "dist"],
+  "folders": [
+    "llmdocs"
+  ],
+  "excludeFolders": [
+    "target",
+    "node_modules",
+    "dist"
+  ],
   "rules": [
     "Record before playback. `playback` serves whatever is in the inventory directory and has nothing to serve without a recording.",
     "The inventory directory (-i, default ./inventory) is the artifact. Use the same path for recording and playback, and keep it — it is what makes a later run comparable.",
     "Playback reproduces the original TTFB and transfer speed by default. That is the point of the tool.",
+    "An unedited resource is replayed byte for byte from originals/ (format 2). Editing the file under contents/, or changing contentEncoding, contentCharset or minify in index.json, makes playback regenerate the body from the editable file and rewrite Content-Encoding to match.",
+    "Transfer time is wire bytes × 8 / mbps only in inventories with \"formatVersion\": 2 (recorded by 0.11+). Older inventories replay the recorded durationMs whatever the body size, so shrinking a file changes nothing until the page is recorded again.",
+    "HTML is stored exactly as recorded and never reformatted; only minified JavaScript and CSS are stored reformatted and re-minified with the same parsers at playback.",
     "--full-throttle removes timing reproduction. The replay gets fast and the numbers stop being comparable to a real load; use it only for smoke tests.",
     "Unmatched requests return 404 by default, deliberately. --passthrough forwards them to the network instead, which reintroduces the nondeterminism the tool exists to remove.",
     "Recording drives a browser through a MITM proxy and reaches the real site, so requests come from wherever it runs.",

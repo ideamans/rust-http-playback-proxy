@@ -1,18 +1,18 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use encoding_rs::{Encoding, SHIFT_JIS, EUC_JP, UTF_8};
-use flate2::write::{GzEncoder, DeflateEncoder};
+use encoding_rs::{Encoding, EUC_JP, SHIFT_JIS, UTF_8};
+use flate2::write::{DeflateEncoder, GzEncoder};
 use flate2::Compression;
 use http::{Request, Response, StatusCode};
 use http_body_util::{combinators::BoxBody, BodyExt, Full};
 use hyper::body::Incoming;
-use std::convert::Infallible;
-use std::io::Write;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use serde::{Deserialize, Serialize};
+use std::convert::Infallible;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::time::Duration;
@@ -35,11 +35,14 @@ const HTML_EUC_JP_META: &str = r#"<!DOCTYPE html><html><head><meta charset="EUC-
 const HTML_UTF8_META: &str = r#"<!DOCTYPE html><html><head><meta charset="UTF-8"><title>テスト</title></head><body><h1>UTF-8のテスト</h1><p>これはUTF-8でエンコードされたHTMLです。</p></body></html>"#;
 
 // CSS with different charsets
-const CSS_SHIFT_JIS: &str = r#"@charset "Shift_JIS";body{margin:0;padding:0}/* 日本語コメント */.test{color:red}"#;
+const CSS_SHIFT_JIS: &str =
+    r#"@charset "Shift_JIS";body{margin:0;padding:0}/* 日本語コメント */.test{color:red}"#;
 
-const CSS_EUC_JP: &str = r#"@charset "EUC-JP";body{margin:0;padding:0}/* 日本語コメント */.test{color:blue}"#;
+const CSS_EUC_JP: &str =
+    r#"@charset "EUC-JP";body{margin:0;padding:0}/* 日本語コメント */.test{color:blue}"#;
 
-const CSS_UTF8: &str = r#"@charset "UTF-8";body{margin:0;padding:0}/* 日本語コメント */.test{color:green}"#;
+const CSS_UTF8: &str =
+    r#"@charset "UTF-8";body{margin:0;padding:0}/* 日本語コメント */.test{color:green}"#;
 
 // JavaScript with different charsets (in comment)
 const JS_SHIFT_JIS: &str = r#"/* Shift_JIS エンコード */ console.log("日本語");"#;
@@ -98,7 +101,8 @@ fn encode_brotli(content: &[u8]) -> Vec<u8> {
         &mut std::io::Cursor::new(content),
         &mut compressed,
         &Default::default(),
-    ).unwrap();
+    )
+    .unwrap();
     compressed
 }
 
@@ -310,7 +314,7 @@ async fn handle_request(
         let body = encode_to_charset(HTML_SHIFT_JIS_META, SHIFT_JIS);
         let response = Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "text/html")  // No charset in header
+            .header("Content-Type", "text/html") // No charset in header
             .body(Full::new(Bytes::from(body)).boxed())
             .unwrap();
         return Ok(response);
@@ -321,7 +325,7 @@ async fn handle_request(
         let body = encode_to_charset(HTML_EUC_JP_META, EUC_JP);
         let response = Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "text/html")  // No charset in header
+            .header("Content-Type", "text/html") // No charset in header
             .body(Full::new(Bytes::from(body)).boxed())
             .unwrap();
         return Ok(response);
@@ -332,7 +336,7 @@ async fn handle_request(
         let body = encode_to_charset(CSS_SHIFT_JIS, SHIFT_JIS);
         let response = Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "text/css")  // No charset in header
+            .header("Content-Type", "text/css") // No charset in header
             .body(Full::new(Bytes::from(body)).boxed())
             .unwrap();
         return Ok(response);
@@ -343,7 +347,7 @@ async fn handle_request(
         let body = encode_to_charset(CSS_UTF8, UTF_8);
         let response = Response::builder()
             .status(StatusCode::OK)
-            .header("Content-Type", "text/css")  // No charset in header
+            .header("Content-Type", "text/css") // No charset in header
             .body(Full::new(Bytes::from(body)).boxed())
             .unwrap();
         return Ok(response);
@@ -496,18 +500,18 @@ async fn wait_for_proxy(port: u16, max_retries: u32) -> Result<()> {
         .await
         {
             Ok(Ok(_)) => {
-                info!(
-                    "Proxy is ready on port {} (took {} seconds)",
-                    port,
-                    i + 1
-                );
+                info!("Proxy is ready on port {} (took {} seconds)", port, i + 1);
                 return Ok(());
             }
             Ok(Err(_)) | Err(_) => {
                 if i == 0 {
                     info!("Waiting for proxy to start on port {}...", port);
                 } else if (i + 1) % 10 == 0 {
-                    info!("Still waiting for proxy... ({}/{} seconds)", i + 1, max_retries);
+                    info!(
+                        "Still waiting for proxy... ({}/{} seconds)",
+                        i + 1,
+                        max_retries
+                    );
                 }
             }
         }
@@ -555,7 +559,10 @@ async fn wait_for_file(path: &std::path::Path, max_attempts: u32) -> Result<()> 
             return Ok(());
         }
         if attempt < max_attempts {
-            info!("Waiting for file: {:?} (attempt {}/{})", path, attempt, max_attempts);
+            info!(
+                "Waiting for file: {:?} (attempt {}/{})",
+                path, attempt, max_attempts
+            );
             sleep(Duration::from_secs(1)).await;
         }
     }
@@ -575,21 +582,14 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
     let html_path = contents_dir.join("get/http/127.0.0.1/index.html");
     wait_for_file(&html_path, 10).await?;
     let html_content = fs::read_to_string(&html_path)?;
-    let html_lines = count_lines(&html_content);
-    let minified_html_lines = count_lines(MINIFIED_HTML);
 
     info!("HTML:");
-    info!("  Minified lines: {}", minified_html_lines);
-    info!("  Beautified lines: {}", html_lines);
-    info!("  Ratio: {:.2}x", html_lines as f64 / minified_html_lines as f64);
+    info!("  Stored bytes: {}", html_content.len());
 
-    // HTML should have significantly more lines after beautification
-    if html_lines < minified_html_lines * 2 {
-        anyhow::bail!(
-            "HTML was not properly beautified: {} lines vs {} lines (expected at least 2x)",
-            html_lines,
-            minified_html_lines
-        );
+    // HTML is stored exactly as recorded: re-serialising the DOM would change
+    // whitespace between inline elements and character references.
+    if html_content != MINIFIED_HTML {
+        anyhow::bail!("HTML was not stored as recorded");
     }
 
     // Check CSS - wait for file to exist (method is lowercase per generate_file_path_from_url)
@@ -602,7 +602,10 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
     info!("CSS:");
     info!("  Minified lines: {}", minified_css_lines);
     info!("  Beautified lines: {}", css_lines);
-    info!("  Ratio: {:.2}x", css_lines as f64 / minified_css_lines as f64);
+    info!(
+        "  Ratio: {:.2}x",
+        css_lines as f64 / minified_css_lines as f64
+    );
 
     // CSS should have significantly more lines after beautification
     if css_lines < minified_css_lines * 2 {
@@ -623,7 +626,10 @@ async fn verify_beautified_content(inventory_dir: &PathBuf) -> Result<()> {
     info!("JavaScript:");
     info!("  Minified lines: {}", minified_js_lines);
     info!("  Beautified lines: {}", js_lines);
-    info!("  Ratio: {:.2}x", js_lines as f64 / minified_js_lines as f64);
+    info!(
+        "  Ratio: {:.2}x",
+        js_lines as f64 / minified_js_lines as f64
+    );
 
     // JavaScript should have significantly more lines after beautification
     if js_lines < minified_js_lines * 2 {
@@ -669,18 +675,27 @@ fn verify_inventory_minify_flags(inventory_dir: &PathBuf) -> Result<()> {
 
         // Check if this is one of our test resources
         if resource.url.ends_with("/") || resource.url.ends_with("/index.html") {
-            if resource.minify != Some(true) {
-                anyhow::bail!("HTML resource should have minify: true, got: {:?}", resource.minify);
+            if resource.minify == Some(true) {
+                anyhow::bail!(
+                    "HTML resource is stored as recorded and must not be re-minified, got: {:?}",
+                    resource.minify
+                );
             }
             html_found = true;
         } else if resource.url.ends_with("/style.css") {
             if resource.minify != Some(true) {
-                anyhow::bail!("CSS resource should have minify: true, got: {:?}", resource.minify);
+                anyhow::bail!(
+                    "CSS resource should have minify: true, got: {:?}",
+                    resource.minify
+                );
             }
             css_found = true;
         } else if resource.url.ends_with("/script.js") {
             if resource.minify != Some(true) {
-                anyhow::bail!("JS resource should have minify: true, got: {:?}", resource.minify);
+                anyhow::bail!(
+                    "JS resource should have minify: true, got: {:?}",
+                    resource.minify
+                );
             }
             js_found = true;
         }
@@ -708,7 +723,10 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
     let inventory_json = fs::read_to_string(&inventory_path)?;
     let inventory: Inventory = serde_json::from_str(&inventory_json)?;
 
-    info!("Checking {} resources for charset handling", inventory.resources.len());
+    info!(
+        "Checking {} resources for charset handling",
+        inventory.resources.len()
+    );
 
     for resource in &inventory.resources {
         let url = &resource.url;
@@ -758,9 +776,9 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
                         // For HTML files
                         if url.ends_with(".html") {
                             // Should contain original Shift_JIS charset declaration
-                            let has_shiftjis_meta = content.contains(r#"charset="Shift_JIS""#) ||
-                                                   content.contains(r#"charset='Shift_JIS'"#) ||
-                                                   content.contains(r#"charset=Shift_JIS"#);
+                            let has_shiftjis_meta = content.contains(r#"charset="Shift_JIS""#)
+                                || content.contains(r#"charset='Shift_JIS'"#)
+                                || content.contains(r#"charset=Shift_JIS"#);
                             if !has_shiftjis_meta {
                                 anyhow::bail!(
                                     "HTML content should preserve original Shift_JIS charset declaration in: {}",
@@ -773,8 +791,8 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
                         // For CSS files
                         if url.ends_with(".css") {
                             // Should contain original Shift_JIS @charset declaration
-                            let has_shiftjis_charset = content.contains(r#"@charset "Shift_JIS""#) ||
-                                                      content.contains(r#"@charset 'Shift_JIS'"#);
+                            let has_shiftjis_charset = content.contains(r#"@charset "Shift_JIS""#)
+                                || content.contains(r#"@charset 'Shift_JIS'"#);
                             if !has_shiftjis_charset {
                                 anyhow::bail!(
                                     "CSS content should preserve original Shift_JIS @charset declaration in: {}",
@@ -787,9 +805,9 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
                         // For HTML files
                         if url.ends_with(".html") {
                             // Should contain original EUC-JP charset declaration
-                            let has_eucjp_meta = content.contains(r#"charset="EUC-JP""#) ||
-                                                content.contains(r#"charset='EUC-JP'"#) ||
-                                                content.contains(r#"charset=EUC-JP"#);
+                            let has_eucjp_meta = content.contains(r#"charset="EUC-JP""#)
+                                || content.contains(r#"charset='EUC-JP'"#)
+                                || content.contains(r#"charset=EUC-JP"#);
                             if !has_eucjp_meta {
                                 anyhow::bail!(
                                     "HTML content should preserve original EUC-JP charset declaration in: {}",
@@ -802,8 +820,8 @@ fn verify_charset_in_inventory(inventory_dir: &PathBuf) -> Result<()> {
                         // For CSS files
                         if url.ends_with(".css") {
                             // Should contain original EUC-JP @charset declaration
-                            let has_eucjp_charset = content.contains(r#"@charset "EUC-JP""#) ||
-                                                   content.contains(r#"@charset 'EUC-JP'"#);
+                            let has_eucjp_charset = content.contains(r#"@charset "EUC-JP""#)
+                                || content.contains(r#"@charset 'EUC-JP'"#);
                             if !has_eucjp_charset {
                                 anyhow::bail!(
                                     "CSS content should preserve original EUC-JP @charset declaration in: {}",
@@ -911,7 +929,10 @@ fn start_playback_proxy(proxy_port: u16, inventory_dir: &PathBuf) -> Result<Chil
     };
 
     info!("start_playback_proxy: inventory_dir = {:?}", inventory_dir);
-    info!("start_playback_proxy: absolute_inventory_dir = {:?}", absolute_inventory_dir);
+    info!(
+        "start_playback_proxy: absolute_inventory_dir = {:?}",
+        absolute_inventory_dir
+    );
 
     // Check if binary exists - prefer using binary over cargo run
     // This is important because cargo run doesn't properly forward SIGINT to child process
@@ -975,9 +996,15 @@ async fn verify_playback_proxy(
     info!("Playback proxy port: {}", playback_proxy_port);
 
     // Double-check inventory directory exists before starting playback proxy
-    info!("Pre-check: inventory_dir exists? {}", inventory_dir.exists());
+    info!(
+        "Pre-check: inventory_dir exists? {}",
+        inventory_dir.exists()
+    );
     if inventory_dir.exists() {
-        info!("Pre-check: inventory_dir is a directory? {}", inventory_dir.is_dir());
+        info!(
+            "Pre-check: inventory_dir is a directory? {}",
+            inventory_dir.is_dir()
+        );
         info!("Pre-check: inventory_dir path: {:?}", inventory_dir);
 
         // List files
@@ -999,7 +1026,10 @@ async fn verify_playback_proxy(
     info!("After 500ms sleep, checking if playback proxy process is still alive...");
     match playback_proxy.try_wait()? {
         Some(status) => {
-            anyhow::bail!("Playback proxy exited immediately with status: {:?}", status);
+            anyhow::bail!(
+                "Playback proxy exited immediately with status: {:?}",
+                status
+            );
         }
         None => {
             info!("✓ Playback proxy process is still running");
@@ -1021,11 +1051,16 @@ async fn verify_playback_proxy(
     // Test Shift_JIS charset reproduction
     info!("\nTesting Shift_JIS charset playback");
     let response = client
-        .get(format!("http://{}:{}/charset/html-shiftjis.html", mock_server_host, mock_server_port))
+        .get(format!(
+            "http://{}:{}/charset/html-shiftjis.html",
+            mock_server_host, mock_server_port
+        ))
         .send()
         .await?;
 
-    let content_type = response.headers().get("content-type")
+    let content_type = response
+        .headers()
+        .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
@@ -1043,7 +1078,10 @@ async fn verify_playback_proxy(
     if had_errors {
         anyhow::bail!("Playback body is not valid Shift_JIS");
     }
-    info!("  ✓ Playback body is valid Shift_JIS: {} bytes", body_bytes.len());
+    info!(
+        "  ✓ Playback body is valid Shift_JIS: {} bytes",
+        body_bytes.len()
+    );
 
     // Verify meta tag was NOT modified (should still say Shift_JIS)
     if !decoded.contains(r#"charset="Shift_JIS"#) && !decoded.contains(r#"charset="shift_jis"#) {
@@ -1054,11 +1092,16 @@ async fn verify_playback_proxy(
     // Test Gzip encoding reproduction
     info!("\nTesting Gzip encoding playback");
     let response = client
-        .get(format!("http://{}:{}/encoding/gzip.html", mock_server_host, mock_server_port))
+        .get(format!(
+            "http://{}:{}/encoding/gzip.html",
+            mock_server_host, mock_server_port
+        ))
         .send()
         .await?;
 
-    let content_encoding = response.headers().get("content-encoding")
+    let content_encoding = response
+        .headers()
+        .get("content-encoding")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
@@ -1073,12 +1116,17 @@ async fn verify_playback_proxy(
     // Test charset-from-content resources (charset detected from HTML/CSS, not HTTP header)
     info!("\nTesting charset-from-content HTML playback (Shift_JIS detected from <meta charset>)");
     let response = client
-        .get(format!("http://{}:{}/charset-from-content/html-shiftjis.html", mock_server_host, mock_server_port))
+        .get(format!(
+            "http://{}:{}/charset-from-content/html-shiftjis.html",
+            mock_server_host, mock_server_port
+        ))
         .send()
         .await?;
 
     // HTTP header should NOT have charset (since original didn't have it)
-    let content_type = response.headers().get("content-type")
+    let content_type = response
+        .headers()
+        .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
@@ -1096,7 +1144,10 @@ async fn verify_playback_proxy(
     if had_errors {
         anyhow::bail!("Playback body is not valid Shift_JIS");
     }
-    info!("  ✓ Playback body is valid Shift_JIS: {} bytes", body_bytes.len());
+    info!(
+        "  ✓ Playback body is valid Shift_JIS: {} bytes",
+        body_bytes.len()
+    );
 
     // Verify <meta charset> is preserved in the HTML
     if !decoded.contains(r#"charset="Shift_JIS"#) && !decoded.contains(r#"charset="shift_jis"#) {
@@ -1107,12 +1158,17 @@ async fn verify_playback_proxy(
     // Test CSS charset-from-content
     info!("\nTesting charset-from-content CSS playback (Shift_JIS detected from @charset)");
     let response = client
-        .get(format!("http://{}:{}/charset-from-content/style-shiftjis.css", mock_server_host, mock_server_port))
+        .get(format!(
+            "http://{}:{}/charset-from-content/style-shiftjis.css",
+            mock_server_host, mock_server_port
+        ))
         .send()
         .await?;
 
     // HTTP header should NOT have charset (since original didn't have it)
-    let content_type = response.headers().get("content-type")
+    let content_type = response
+        .headers()
+        .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
@@ -1130,7 +1186,10 @@ async fn verify_playback_proxy(
     if had_errors {
         anyhow::bail!("Playback CSS body is not valid Shift_JIS");
     }
-    info!("  ✓ Playback CSS body is valid Shift_JIS: {} bytes", body_bytes.len());
+    info!(
+        "  ✓ Playback CSS body is valid Shift_JIS: {} bytes",
+        body_bytes.len()
+    );
 
     // Verify @charset declaration is preserved
     if !decoded.contains(r#"@charset "Shift_JIS"#) && !decoded.contains(r#"@charset "shift_jis"#) {
@@ -1159,7 +1218,10 @@ async fn main() -> Result<()> {
     let recording_proxy_port = 18081;
 
     // Start mock HTTP server
-    info!("\nStarting mock HTTP server on {}:{}", MOCK_SERVER_HOST, mock_server_port);
+    info!(
+        "\nStarting mock HTTP server on {}:{}",
+        MOCK_SERVER_HOST, mock_server_port
+    );
     let mock_server_handle = tokio::spawn(async move {
         if let Err(e) = start_mock_server(mock_server_port).await {
             error!("Mock server error: {:?}", e);
@@ -1189,43 +1251,181 @@ async fn main() -> Result<()> {
 
     // Make requests for HTML, CSS, and JS
     info!("Making request for HTML");
-    make_request(recording_proxy_port, &format!("http://{}:{}/", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(
+        recording_proxy_port,
+        &format!("http://{}:{}/", MOCK_SERVER_HOST, mock_server_port),
+    )
+    .await?;
 
     info!("Making request for CSS");
-    make_request(recording_proxy_port, &format!("http://{}:{}/style.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(
+        recording_proxy_port,
+        &format!("http://{}:{}/style.css", MOCK_SERVER_HOST, mock_server_port),
+    )
+    .await?;
 
     info!("Making request for JavaScript");
-    make_request(recording_proxy_port, &format!("http://{}:{}/script.js", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(
+        recording_proxy_port,
+        &format!("http://{}:{}/script.js", MOCK_SERVER_HOST, mock_server_port),
+    )
+    .await?;
 
     // Make requests for charset tests
     info!("\nMaking requests for charset tests");
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/html-shiftjis.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/html-eucjp.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/html-utf8.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/style-shiftjis.css", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/style-eucjp.css", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/style-utf8.css", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/script-shiftjis.js", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/script-eucjp.js", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset/script-utf8.js", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/html-shiftjis.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/html-eucjp.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/html-utf8.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/style-shiftjis.css",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/style-eucjp.css",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/style-utf8.css",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/script-shiftjis.js",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/script-eucjp.js",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset/script-utf8.js",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
 
     // Make requests for encoding tests
     info!("\nMaking requests for encoding tests");
-    make_request(recording_proxy_port, &format!("http://{}:{}/encoding/gzip.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/encoding/br.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/encoding/deflate.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/encoding/gzip.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/encoding/br.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/encoding/deflate.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
 
     // Make requests for combination tests
     info!("\nMaking requests for combination tests");
-    make_request(recording_proxy_port, &format!("http://{}:{}/combo/shiftjis-gzip.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/combo/eucjp-br.html", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/combo/shiftjis-gzip.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/combo/eucjp-br.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
 
     // Make requests for charset-from-content tests (no HTTP header charset)
     info!("\nMaking requests for charset-from-content tests (detecting charset from HTML/CSS content)");
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/html-shiftjis.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/html-eucjp.html", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/style-shiftjis.css", MOCK_SERVER_HOST, mock_server_port)).await?;
-    make_request(recording_proxy_port, &format!("http://{}:{}/charset-from-content/style-utf8.css", MOCK_SERVER_HOST, mock_server_port)).await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset-from-content/html-shiftjis.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset-from-content/html-eucjp.html",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset-from-content/style-shiftjis.css",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
+    make_request(
+        recording_proxy_port,
+        &format!(
+            "http://{}:{}/charset-from-content/style-utf8.css",
+            MOCK_SERVER_HOST, mock_server_port
+        ),
+    )
+    .await?;
 
     info!("\nAll requests completed");
 
@@ -1353,9 +1553,13 @@ async fn main() -> Result<()> {
     sleep(Duration::from_secs(1)).await;
 
     // Verify mock server is actually stopped by trying to connect
-    match tokio::net::TcpStream::connect(format!("{}:{}", MOCK_SERVER_HOST, mock_server_port)).await {
+    match tokio::net::TcpStream::connect(format!("{}:{}", MOCK_SERVER_HOST, mock_server_port)).await
+    {
         Ok(_) => {
-            anyhow::bail!("Mock server is still running on port {}! Cannot verify playback.", mock_server_port);
+            anyhow::bail!(
+                "Mock server is still running on port {}! Cannot verify playback.",
+                mock_server_port
+            );
         }
         Err(_) => {
             info!("✓ Mock server stopped successfully");
@@ -1363,7 +1567,13 @@ async fn main() -> Result<()> {
     }
 
     let playback_proxy_port = 18082;
-    verify_playback_proxy(&inventory_dir, playback_proxy_port, MOCK_SERVER_HOST, mock_server_port).await?;
+    verify_playback_proxy(
+        &inventory_dir,
+        playback_proxy_port,
+        MOCK_SERVER_HOST,
+        mock_server_port,
+    )
+    .await?;
 
     info!("\n=================================");
     info!("  ALL CONTENT TESTS PASSED!");

@@ -129,14 +129,17 @@ Framework-free trait-based DI for testability:
 4. On Ctrl+C (SIGINT), save inventory and process resources:
    - Decompress response bodies
    - Convert text resources to UTF-8
-   - Beautify and detect minification (2x+ line increase = minified)
+   - Format JS/CSS (swc / lightningcss) and detect minification (2x+ line increase = minified). HTML is never reformatted
    - Save to `inventory_dir/contents/<method>/<protocol>/<path>`
+   - Keep the wire body under `inventory_dir/originals/` when it differs from the editable file, with the editable file's SHA-256 (`original`)
+   - Write `formatVersion: 2`
 
 **Playback Flow**
 1. Load `index.json`
 2. Convert Resources to Transactions:
-   - Re-minify if `minify: true`
-   - Re-encode (gzip/br/etc)
+   - Unedited (editable file hash and encoding/charset/minify match `original`): serve the recorded wire bytes and headers
+   - Edited: re-minify with swc / lightningcss if `minify: true`, re-encode the charset, compress with `contentEncoding`, rewrite `Content-Encoding`
+   - Transfer time: `wire bytes × 8 / mbps` (format 2) or the recorded `durationMs` (legacy, no `formatVersion`)
    - Split into chunks with timestamps
 3. Start HTTP proxy server
 4. Match requests to Transactions
@@ -206,7 +209,7 @@ Located in `acceptance/` directory. Three main test suites:
    - Runtime: ~60-90 seconds
 
 3. **Content Beautification Test** (`acceptance/content/`):
-   - Verifies minified HTML/CSS/JS are beautified during recording
+   - Verifies minified CSS/JS are beautified during recording, and HTML is stored as recorded
    - Ensures `minify: true` flag is set correctly
    - Makes recorded content editable for PageSpeed optimization
    - Runtime: ~10 seconds
@@ -226,7 +229,7 @@ make test-all
 - **Serialization**: Serde + serde_json
 - **Compression**: flate2 (gzip/deflate), brotli, zstd
 - **Encoding**: encoding_rs (charset conversion)
-- **Minify**: prettyish-html, prettify-js (beautification)
+- **Formatting / minify**: swc (JS) and lightningcss (CSS), both directions. HTML is not reformatted
 - **CLI**: Clap 4.5 (derive features)
 - **Testing**: tempfile, tokio-test, reqwest (for integration tests)
 
@@ -288,7 +291,7 @@ inventory.resources.push(resource);
 - First request received is time origin (0 seconds)
 - Response body recorded as-is if compressed
 - Record response body length and time from response start to completion
-- Mbps calculation: `(response body length / (response end - response start) seconds) / (1024 * 1024)`
+- Mbps calculation: `wire body bytes × 8 / download microseconds` (decimal megabits per second; the download time is measured in microseconds so a sub-millisecond body still has a throughput)
 
 ### Text Resource Processing
 
@@ -298,16 +301,28 @@ Special handling for key text resources (HTML, CSS, JavaScript):
    - Reference Charset from headers or content declaration
    - After UTF-8 conversion, update header Charset to UTF-8 and remove content Charset declarations
 
-2. Beautify processing:
+2. Beautify processing (JS/CSS only):
    - If beautified line count is 2x+ original, resource was minified
    - Set resource `minify: true` flag
+   - HTML is saved as received. Do not reintroduce HTML pretty-printing: re-serialising
+     a document changes inline whitespace, character references, `<pre>` and DOCTYPE
+
+### Accuracy contract (the point of the tool)
+
+- **An unedited resource replays byte for byte in the recorded time.** Keep
+  `original` + `formatVersion: 2` working; `src/playback/accuracy_tests.rs` round-trips
+  the batch processor and the transaction builder to enforce it
+- **An edited resource replays correctly in time proportional to its size**
+  (`wire bytes × 8 / mbps`)
+- **Legacy inventories (no `formatVersion`) replay exactly as before**: recorded
+  `durationMs`, the legacy textual minifier. Do not change that path
 
 ### Playback Mode Pre-processing
 
 - After loading Inventory, convert all Resources to Transactions
 - Transaction includes:
   - Pre-processed information for returning HTTP responses
-  - Re-minify if `minify: true`
+  - Serve the recorded wire body if unedited; otherwise re-minify if `minify: true`
   - Encode and split into chunks
   - Target send time for each chunk (including TTFB offset)
 

@@ -1,23 +1,85 @@
 use crate::traits::FileSystem;
-use crate::types::{BodyChunk, Inventory, Resource, Transaction};
+use crate::types::{
+    BodyChunk, CURRENT_FORMAT_VERSION, ContentEncodingType, Inventory, Resource, Transaction,
+};
 use anyhow::Result;
 use encoding_rs::{Encoding, UTF_8};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
 const CHUNK_SIZE: usize = 1024 * 64; // 64KB chunks
 const TARGET_MBPS: f64 = 1.0; // Default target speed in Mbps
 
+/// How the inventory being replayed wants bodies and timing reproduced.
+#[derive(Debug, Clone, Default)]
+pub struct PlaybackContext {
+    /// `Inventory::format_version`, 1 when absent.
+    pub format_version: u32,
+    /// Median recorded throughput per host, for a resource of a current-format
+    /// inventory that has no throughput of its own.
+    pub host_mbps: HashMap<String, f64>,
+}
+
+impl PlaybackContext {
+    #[cfg(test)]
+    pub fn legacy() -> Self {
+        Self {
+            format_version: 1,
+            host_mbps: HashMap::new(),
+        }
+    }
+
+    pub fn from_inventory(inventory: &Inventory) -> Self {
+        let mut samples: HashMap<String, Vec<f64>> = HashMap::new();
+        for resource in &inventory.resources {
+            if let (Some(host), Some(mbps)) = (host_of(&resource.url), resource.mbps)
+                && mbps.is_finite()
+                && mbps > 0.0
+            {
+                samples.entry(host).or_default().push(mbps);
+            }
+        }
+        let host_mbps = samples
+            .into_iter()
+            .map(|(host, mut values)| {
+                values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+                (host, values[values.len() / 2])
+            })
+            .collect();
+        Self {
+            format_version: inventory.format_version.unwrap_or(1),
+            host_mbps,
+        }
+    }
+
+    fn sizes_drive_timing(&self) -> bool {
+        self.format_version >= CURRENT_FORMAT_VERSION
+    }
+}
+
+fn host_of(url: &str) -> Option<String> {
+    url.parse::<hyper::Uri>()
+        .ok()
+        .and_then(|uri| uri.host().map(|h| h.to_ascii_lowercase()))
+}
+
 pub async fn convert_resources_to_transactions<F: FileSystem>(
     inventory: &Inventory,
     inventory_dir: &Path,
     file_system: Arc<F>,
 ) -> Result<Vec<Transaction>> {
+    let context = PlaybackContext::from_inventory(inventory);
     let mut transactions = Vec::new();
 
     for resource in &inventory.resources {
-        if let Some(transaction) =
-            convert_resource_to_transaction(resource, inventory_dir, file_system.clone()).await?
+        if let Some(transaction) = convert_resource_to_transaction_with(
+            resource,
+            inventory_dir,
+            file_system.clone(),
+            &context,
+        )
+        .await?
         {
             transactions.push(transaction);
         }
@@ -26,38 +88,149 @@ pub async fn convert_resources_to_transactions<F: FileSystem>(
     Ok(transactions)
 }
 
+/// Convert one resource as the legacy format does (timing from `durationMs`).
+#[cfg(test)]
 pub async fn convert_resource_to_transaction<F: FileSystem>(
     resource: &Resource,
     inventory_dir: &Path,
     file_system: Arc<F>,
 ) -> Result<Option<Transaction>> {
-    // Load content
-    let content = if let Some(file_path) = &resource.content_file_path {
-        // file_path is now relative to inventory_dir (includes "contents/" prefix)
-        let full_path = inventory_dir.join(file_path);
-        if file_system.exists(&full_path).await {
-            file_system.read(&full_path).await?
-        } else if let Some(base64_content) = &resource.content_base64 {
-            use base64::{Engine as _, engine::general_purpose};
-            general_purpose::STANDARD.decode(base64_content)?
-        } else if let Some(utf8_content) = &resource.content_utf8 {
-            utf8_content.as_bytes().to_vec()
-        } else {
-            return Ok(None);
-        }
-    } else if let Some(base64_content) = &resource.content_base64 {
-        use base64::{Engine as _, engine::general_purpose};
-        general_purpose::STANDARD.decode(base64_content)?
-    } else if let Some(utf8_content) = &resource.content_utf8 {
-        utf8_content.as_bytes().to_vec()
+    convert_resource_to_transaction_with(
+        resource,
+        inventory_dir,
+        file_system,
+        &PlaybackContext::legacy(),
+    )
+    .await
+}
+
+pub async fn convert_resource_to_transaction_with<F: FileSystem>(
+    resource: &Resource,
+    inventory_dir: &Path,
+    file_system: Arc<F>,
+    context: &PlaybackContext,
+) -> Result<Option<Transaction>> {
+    let mut headers = resource.raw_headers.clone().unwrap_or_default();
+
+    let final_content = if let Some(original) =
+        unedited_original(resource, inventory_dir, file_system.as_ref()).await?
+    {
+        // Byte for byte what the browser received at recording time, with the
+        // recorded Content-Encoding header that describes those bytes.
+        original
     } else {
-        return Ok(None);
+        let Some(content) =
+            load_editable_content(resource, inventory_dir, file_system.as_ref()).await?
+        else {
+            return Ok(None);
+        };
+        let regenerated = regenerate_body(content, resource, context)?;
+        set_content_encoding_header(&mut headers, &resource.content_encoding);
+        regenerated
     };
 
+    let (chunks, target_close_time) = if context.sizes_drive_timing() {
+        let duration = transfer_duration_ms(final_content.len(), resource, context);
+        create_chunks_with_duration(&final_content, duration)
+    } else {
+        create_chunks(&final_content, resource)?
+    };
+
+    // Update content-length
+    headers.insert(
+        "content-length".to_string(),
+        crate::types::HeaderValue::Single(final_content.len().to_string()),
+    );
+
+    // NOTE: We do NOT modify Content-Type header here.
+    // The original Content-Type from raw_headers is preserved exactly as recorded.
+    // The content_charset field is only used for re-encoding the body content,
+    // NOT for modifying HTTP headers.
+
+    Ok(Some(Transaction {
+        method: resource.method.clone(),
+        url: resource.url.clone(),
+        ttfb: resource.ttfb_ms,
+        status_code: resource.status_code,
+        error_message: resource.error_message.clone(),
+        raw_headers: Some(headers),
+        chunks,
+        target_close_time,
+    }))
+}
+
+/// The recorded wire body, if the resource has not been edited since recording:
+/// the editable file still hashes to what was written, and none of the fields
+/// that shape the served body (encoding, charset, minify) has changed.
+async fn unedited_original<F: FileSystem>(
+    resource: &Resource,
+    inventory_dir: &Path,
+    file_system: &F,
+) -> Result<Option<Vec<u8>>> {
+    let Some(original) = &resource.original else {
+        return Ok(None);
+    };
+    if original.content_encoding != resource.content_encoding
+        || original.content_charset != resource.content_charset
+        || original.minify != resource.minify
+    {
+        return Ok(None);
+    }
+    let Some(content_path) = &resource.content_file_path else {
+        return Ok(None);
+    };
+    let content_path = inventory_dir.join(content_path);
+    let original_path = inventory_dir.join(&original.file_path);
+    if !file_system.exists(&content_path).await || !file_system.exists(&original_path).await {
+        return Ok(None);
+    }
+    let editable = file_system.read(&content_path).await?;
+    if crate::utils::sha256_hex(&editable) != original.content_sha256 {
+        return Ok(None);
+    }
+    Ok(Some(file_system.read(&original_path).await?))
+}
+
+/// The editable body: the file under `contents/` when it exists, otherwise an
+/// inline `contentBase64` / `contentUtf8`.
+async fn load_editable_content<F: FileSystem>(
+    resource: &Resource,
+    inventory_dir: &Path,
+    file_system: &F,
+) -> Result<Option<Vec<u8>>> {
+    if let Some(file_path) = &resource.content_file_path {
+        // file_path is relative to inventory_dir (includes "contents/" prefix)
+        let full_path = inventory_dir.join(file_path);
+        if file_system.exists(&full_path).await {
+            return Ok(Some(file_system.read(&full_path).await?));
+        }
+    }
+    if let Some(base64_content) = &resource.content_base64 {
+        use base64::{Engine as _, engine::general_purpose};
+        return Ok(Some(general_purpose::STANDARD.decode(base64_content)?));
+    }
+    if let Some(utf8_content) = &resource.content_utf8 {
+        return Ok(Some(utf8_content.as_bytes().to_vec()));
+    }
+    Ok(None)
+}
+
+/// Build the wire body from an edited (or legacy) resource: minify if flagged,
+/// re-encode to the original charset, then compress with `contentEncoding`.
+fn regenerate_body(
+    content: Vec<u8>,
+    resource: &Resource,
+    context: &PlaybackContext,
+) -> Result<Vec<u8>> {
     // Process content based on minify flag
     // If minification fails, log warning and use original content
     let mut processed_content = if resource.minify.unwrap_or(false) {
-        match minify_content(&content, &resource.content_type_mime) {
+        let minified = if context.sizes_drive_timing() {
+            minify_content(&content, &resource.content_type_mime)
+        } else {
+            legacy_minify_content(&content, &resource.content_type_mime)
+        };
+        match minified {
             Ok(minified) => minified,
             Err(e) => {
                 tracing::warn!(
@@ -65,7 +238,7 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
                     resource.url,
                     e
                 );
-                content.clone()
+                content
             }
         }
     } else {
@@ -86,97 +259,167 @@ pub async fn convert_resource_to_transaction<F: FileSystem>(
                     charset,
                     e
                 );
-                // Keep processed_content as-is (UTF-8)
             }
         }
     }
 
     // Compress content if needed
-    let final_content = if let Some(encoding) = &resource.content_encoding {
-        compress_content(&processed_content, encoding)?
+    if let Some(encoding) = &resource.content_encoding {
+        compress_content(&processed_content, encoding)
     } else {
-        processed_content
-    };
-
-    // Create chunks and calculate target_close_time
-    let (chunks, target_close_time) = create_chunks(&final_content, resource)?;
-
-    let mut headers = resource.raw_headers.clone().unwrap_or_default();
-
-    // Update content-length
-    headers.insert(
-        "content-length".to_string(),
-        crate::types::HeaderValue::Single(final_content.len().to_string()),
-    );
-
-    // NOTE: We do NOT modify Content-Type header here.
-    // The original Content-Type from raw_headers is preserved exactly as recorded.
-    // The content_charset field is only used for re-encoding the body content (done above),
-    // NOT for modifying HTTP headers.
-
-    Ok(Some(Transaction {
-        method: resource.method.clone(),
-        url: resource.url.clone(),
-        ttfb: resource.ttfb_ms,
-        status_code: resource.status_code,
-        error_message: resource.error_message.clone(),
-        raw_headers: Some(headers),
-        chunks,
-        target_close_time,
-    }))
+        Ok(processed_content)
+    }
 }
 
-pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChunk>, u64)> {
-    let mut chunks = Vec::new();
-    let total_size = content.len();
-
-    if total_size == 0 {
-        // If no content, close time is 0 (TTFB is handled separately in serve_transaction)
-        return Ok((chunks, 0));
+/// Make the Content-Encoding header describe the regenerated body, so that an
+/// edited `contentEncoding` is not served under the recorded header.
+fn set_content_encoding_header(
+    headers: &mut crate::types::HttpHeaders,
+    encoding: &Option<ContentEncodingType>,
+) {
+    if encoding.is_none() {
+        // A recorded header we could not parse (x-gzip, a chain of codings) was
+        // never decoded, so the body is still encoded that way: leave it alone.
+        let recorded_is_known = headers.iter().any(|(name, value)| {
+            name.eq_ignore_ascii_case("content-encoding")
+                && value.first().parse::<ContentEncodingType>().is_ok()
+        });
+        if !recorded_is_known {
+            return;
+        }
     }
+    headers.retain(|name, _| !name.eq_ignore_ascii_case("content-encoding"));
+    let value = match encoding {
+        Some(ContentEncodingType::Gzip) => "gzip",
+        Some(ContentEncodingType::Deflate) => "deflate",
+        Some(ContentEncodingType::Br) => "br",
+        Some(ContentEncodingType::Zstd) => "zstd",
+        Some(ContentEncodingType::Compress) => "compress",
+        Some(ContentEncodingType::Identity) | None => return,
+    };
+    headers.insert(
+        "content-encoding".to_string(),
+        crate::types::HeaderValue::Single(value.to_string()),
+    );
+}
 
+/// Milliseconds to transfer `wire_len` body bytes.
+///
+/// Current format: `wire bytes × 8 / mbps`. The recorded `mbps` comes from the
+/// recorded wire bytes and the microsecond download time, so an unedited body
+/// takes the recorded time and an edited one takes time in proportion to its
+/// size. Without a throughput of its own, the median of the same host is used.
+///
+/// Legacy format: the recorded `durationMs`, whatever the size.
+pub fn transfer_duration_ms(
+    wire_len: usize,
+    resource: &Resource,
+    context: &PlaybackContext,
+) -> u64 {
+    if wire_len == 0 {
+        return 0;
+    }
+    if !context.sizes_drive_timing() {
+        return legacy_transfer_duration_ms(wire_len, resource);
+    }
+    let mbps = resource
+        .mbps
+        .filter(|m| m.is_finite() && *m > 0.0)
+        .or_else(|| host_of(&resource.url).and_then(|h| context.host_mbps.get(&h).copied()))
+        .unwrap_or(TARGET_MBPS);
+    // bits / (megabits per second) = microseconds
+    let micros = wire_len as f64 * 8.0 / mbps;
+    (micros / 1000.0).round() as u64
+}
+
+fn legacy_transfer_duration_ms(total_size: usize, resource: &Resource) -> u64 {
     // Use actual recorded transfer duration (duration_ms)
-    // This ensures we reproduce the exact timing from the recording
-    let transfer_duration_ms = if let Some(duration_ms) = resource.duration_ms {
+    if let Some(duration_ms) = resource.duration_ms {
         duration_ms
     } else {
         // Fallback: calculate from mbps if duration_ms is not available
         let mbps = resource.mbps.unwrap_or(TARGET_MBPS);
         let bytes_per_ms = (mbps * 1000.0 * 1000.0) / 8.0 / 1000.0;
         (total_size as f64 / bytes_per_ms) as u64
-    };
+    }
+}
 
+/// Split a body into chunks with the legacy timing (recorded `durationMs`).
+pub fn create_chunks(content: &[u8], resource: &Resource) -> Result<(Vec<BodyChunk>, u64)> {
+    if content.is_empty() {
+        // If no content, close time is 0 (TTFB is handled separately in serve_transaction)
+        return Ok((Vec::new(), 0));
+    }
     // If transfer duration is 0, make it at least 1ms to avoid division by zero
-    let transfer_duration_ms = std::cmp::max(1, transfer_duration_ms);
+    let transfer_duration_ms =
+        std::cmp::max(1, legacy_transfer_duration_ms(content.len(), resource));
+    let total_size = content.len();
+    let mut chunks = Vec::new();
+    let mut offset = 0;
+    let mut current_time = 0u64;
+    while offset < total_size {
+        let chunk_size = std::cmp::min(CHUNK_SIZE, total_size - offset);
+        chunks.push(BodyChunk {
+            chunk: content[offset..offset + chunk_size].to_vec(),
+            target_time: current_time,
+        });
+        // Legacy pacing: each chunk's share truncated on its own
+        current_time +=
+            ((chunk_size as f64 / total_size as f64) * transfer_duration_ms as f64) as u64;
+        offset += chunk_size;
+    }
+    Ok((chunks, transfer_duration_ms))
+}
+
+/// Split a body into chunks spread evenly, by size, over `transfer_duration_ms`
+/// counted from the end of the TTFB wait.
+pub fn create_chunks_with_duration(
+    content: &[u8],
+    transfer_duration_ms: u64,
+) -> (Vec<BodyChunk>, u64) {
+    let mut chunks = Vec::new();
+    let total_size = content.len();
+    if total_size == 0 {
+        return (chunks, 0);
+    }
 
     let mut offset = 0;
-    // Start at 0 - chunks are relative times from TTFB (TTFB is waited separately in proxy.rs)
     let mut current_time = 0u64;
 
     while offset < total_size {
         let chunk_size = std::cmp::min(CHUNK_SIZE, total_size - offset);
-        let chunk_data = content[offset..offset + chunk_size].to_vec();
-
         chunks.push(BodyChunk {
-            chunk: chunk_data,
+            chunk: content[offset..offset + chunk_size].to_vec(),
             target_time: current_time,
         });
 
-        // Calculate time for next chunk based on proportional distribution
-        // Each chunk gets its share of the total transfer time based on its size
-        let chunk_duration_ms =
-            ((chunk_size as f64 / total_size as f64) * transfer_duration_ms as f64) as u64;
-        current_time += chunk_duration_ms;
+        // Cumulative share of the transfer time, so rounding never accumulates
         offset += chunk_size;
+        current_time = ((offset as f64 / total_size as f64) * transfer_duration_ms as f64) as u64;
     }
 
     // target_close_time is the total transfer duration (relative to TTFB completion)
-    let target_close_time = transfer_duration_ms;
-
-    Ok((chunks, target_close_time))
+    (chunks, transfer_duration_ms)
 }
 
+/// Minify an edited text body with real parsers. HTML is never rewritten: the
+/// recorder keeps it as recorded, and any textual whitespace removal can change
+/// how the document renders.
 pub fn minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<u8>> {
+    let content_str = String::from_utf8_lossy(content);
+    let minified = match mime_type.as_deref() {
+        Some("text/css") => crate::beautify::minify_css(&content_str)?,
+        Some("application/javascript") | Some("text/javascript") => {
+            crate::beautify::minify_javascript(&content_str)?
+        }
+        _ => return Ok(content.to_vec()),
+    };
+    Ok(minified.into_bytes())
+}
+
+/// The textual minifier of the legacy format, kept so that recordings made
+/// before the current format replay exactly as they did.
+pub fn legacy_minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<u8>> {
     let content_str = String::from_utf8_lossy(content);
 
     let minified = match mime_type.as_deref() {
@@ -253,8 +496,6 @@ pub fn minify_content(content: &[u8], mime_type: &Option<String>) -> Result<Vec<
 
     Ok(minified.into_bytes())
 }
-
-use crate::types::ContentEncodingType;
 
 pub fn compress_content(content: &[u8], encoding: &ContentEncodingType) -> Result<Vec<u8>> {
     match encoding {

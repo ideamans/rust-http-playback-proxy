@@ -3,7 +3,7 @@ use crate::utils::get_port_or_default;
 use anyhow::Result;
 use std::path::PathBuf;
 
-mod batch_processor;
+pub(crate) mod batch_processor;
 mod hudsucker_handler;
 mod processor;
 pub mod proxy;
@@ -54,4 +54,14 @@ pub async fn run_recording_mode(
     inventory.device_type = Some(device);
 
     proxy::start_recording_proxy(port, inventory, inventory_dir, compiled_patterns).await
+}
+
+/// Megabits per second for `bytes` downloaded in `duration_us` microseconds.
+/// `None` when nothing was transferred or no time could be measured.
+pub fn throughput_mbps(bytes: usize, duration_us: u64) -> Option<f64> {
+    if bytes == 0 || duration_us == 0 {
+        return None;
+    }
+    // bits per microsecond equals megabits per second
+    Some(bytes as f64 * 8.0 / duration_us as f64)
 }

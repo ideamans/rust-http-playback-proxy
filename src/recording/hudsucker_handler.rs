@@ -244,21 +244,20 @@ impl HttpHandler for RecordingHandler {
                 }
             };
 
+            // The body download time is kept in microseconds: small first-party
+            // files often arrive in well under a millisecond, and truncating that
+            // to 0 ms would leave no throughput to replay an edited body with.
+            let download_end = Instant::now();
+            let duration_us = download_end.duration_since(ttfb_instant).as_micros() as u64;
+
             let (ttfb_ms, duration_ms) = if let Some(info) = request_info {
                 // Calculate TTFB relative to request start (pure TTFB duration)
                 let ttfb_ms = ttfb_instant.duration_since(info.request_start).as_millis() as u64;
-
-                // Calculate download end time relative to request start (not proxy start)
-                let download_end = Instant::now();
-                let download_end_ms =
-                    download_end.duration_since(info.request_start).as_millis() as u64;
-
-                // Calculate duration from TTFB to download end
-                let duration_ms = download_end_ms.saturating_sub(ttfb_ms);
+                let duration_ms = (duration_us + 500) / 1000;
 
                 info!(
-                    "Matched response with request: {} {} (TTFB: {}ms, duration: {}ms, request offset: {}ms)",
-                    method_str, url, ttfb_ms, duration_ms, info.elapsed_since_start
+                    "Matched response with request: {} {} (TTFB: {}ms, duration: {}us, request offset: {}ms)",
+                    method_str, url, ttfb_ms, duration_us, info.elapsed_since_start
                 );
 
                 (ttfb_ms, duration_ms)
@@ -269,11 +268,7 @@ impl HttpHandler for RecordingHandler {
                     method_str, url, client_addr
                 );
                 let elapsed = ttfb_instant.duration_since(*start_time).as_millis() as u64;
-                let download_end = Instant::now();
-                let download_end_elapsed =
-                    download_end.duration_since(*start_time).as_millis() as u64;
-                let duration = download_end_elapsed.saturating_sub(elapsed);
-                (elapsed, duration)
+                (elapsed, (duration_us + 500) / 1000)
             };
 
             // Create resource with minimal processing
@@ -330,21 +325,11 @@ impl HttpHandler for RecordingHandler {
                     Some(ct.split(';').next().unwrap_or(ct).trim().to_string());
             }
 
-            // Calculate mbps (megabits per second) from body size and duration
-            // Use compressed body size (what was actually transferred)
-            let body_size = body_bytes.len() as f64;
-            #[allow(clippy::collapsible_if)]
-            if let Some(dur_ms) = resource.duration_ms {
-                if dur_ms > 0 {
-                    let seconds = (dur_ms as f64) / 1000.0;
-                    if seconds > 0.0 {
-                        // bytes/s -> bits/s -> Mb/s (megabits per second)
-                        let bytes_per_second = body_size / seconds;
-                        let bits_per_second = bytes_per_second * 8.0;
-                        resource.mbps = Some(bits_per_second / (1000.0 * 1000.0));
-                    }
-                }
-            }
+            // Throughput of the body download, from the bytes that actually crossed
+            // the wire (still compressed) and the microsecond duration. Playback
+            // replays `bytes × 8 / mbps`, so an unedited body takes exactly the
+            // recorded time and an edited one takes time in proportion to its size.
+            resource.mbps = crate::recording::throughput_mbps(body_bytes.len(), duration_us);
 
             // Store raw body (as-is, possibly compressed) for later processing
             resource.raw_body = Some(body_bytes.to_vec());
