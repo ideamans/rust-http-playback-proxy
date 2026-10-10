@@ -1,16 +1,18 @@
-export type HttpHeaders = { [key: string]: string };
+export type HttpHeaders = { [key: string]: string | string[] };
 
 export type ContentEncodingType =
   | "gzip"
   | "compress"
   | "deflate"
   | "br"
+  | "zstd"
   | "identity";
 
 export interface Resource {
   method: string;
   url: string;
   ttfbMs: number;
+  durationMs?: number;
   mbps?: number;
   statusCode?: number;
   errorMessage?: string;
@@ -22,12 +24,23 @@ export interface Resource {
   contentUtf8?: string;
   contentBase64?: string;
   minify?: boolean;
+  original?: OriginalBody;
+}
+
+export interface OriginalBody {
+  filePath: string;
+  contentSha256: string;
+  contentEncoding?: ContentEncodingType;
+  contentCharset?: string;
+  minify?: boolean;
 }
 
 export type DeviceType = "desktop" | "mobile";
 
 export interface Inventory {
+  formatVersion?: number;
   entryUrl?: string;
+  extraUrls?: string[];
   deviceType?: DeviceType;
   resources: Resource[];
 }

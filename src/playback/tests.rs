@@ -174,11 +174,13 @@ mod playback_tests {
 
     #[test]
     fn test_minify_content() {
-        use crate::playback::transaction::minify_content;
+        use crate::playback::transaction::{legacy_minify_content, minify_content};
 
-        // Test HTML minification
+        // HTML is minified only by the legacy format; the current one keeps it as recorded
         let html_content = b"<html>\n  <body>\n    <h1>Test</h1>\n  </body>\n</html>";
-        let minified = minify_content(html_content, &Some("text/html".to_string())).unwrap();
+        let untouched = minify_content(html_content, &Some("text/html".to_string())).unwrap();
+        assert_eq!(untouched, html_content.to_vec());
+        let minified = legacy_minify_content(html_content, &Some("text/html".to_string())).unwrap();
         let minified_str = String::from_utf8(minified).unwrap();
 
         // Should have fewer newlines and spaces

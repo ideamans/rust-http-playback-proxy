@@ -146,12 +146,42 @@ pub struct Resource {
     pub content_base64: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub minify: Option<bool>,
+    /// The body exactly as it crossed the wire at recording time, and the state of
+    /// the editable file it was derived from. Playback serves these bytes untouched
+    /// as long as the editable file and the fields that shape the body still match.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original: Option<OriginalBody>,
 
     // Raw body bytes (as received from upstream, possibly compressed)
     // This field is used only during recording and is not serialized to index.json
     #[serde(skip)]
     pub raw_body: Option<Vec<u8>>,
 }
+
+/// The recorded wire body of a resource, kept so that an unedited resource is
+/// replayed byte for byte (content, compression and size), not regenerated.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct OriginalBody {
+    /// Path of the raw body relative to the inventory directory, still
+    /// content-encoded exactly as received (starts with `originals/`).
+    pub file_path: String,
+    /// SHA-256 (hex) of the editable file under `contents/` as it was written.
+    pub content_sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_encoding: Option<ContentEncodingType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_charset: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minify: Option<bool>,
+}
+
+/// Inventory format written by the current recorder.
+///
+/// - absent / 1: transfer time is the recorded `durationMs`, whatever the body size
+/// - 2: transfer time is `wire bytes × 8 / mbps`, and unedited bodies are served
+///   from `original`
+pub const CURRENT_FORMAT_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ValueEnum, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -163,6 +193,8 @@ pub enum DeviceType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Inventory {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format_version: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -212,6 +244,7 @@ impl Resource {
             content_utf8: None,
             content_base64: None,
             minify: None,
+            original: None,
             raw_body: None,
         }
     }
@@ -220,6 +253,7 @@ impl Resource {
 impl Inventory {
     pub fn new() -> Self {
         Self {
+            format_version: None,
             entry_url: None,
             extra_urls: None,
             device_type: None,

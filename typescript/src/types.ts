@@ -11,7 +11,7 @@ export type ContentEncodingType = 'gzip' | 'compress' | 'deflate' | 'br' | 'zstd
 /**
  * HTTP headers map
  */
-export type HttpHeaders = Record<string, string>;
+export type HttpHeaders = Record<string, string | string[]>;
 
 /**
  * Represents a single HTTP resource in the inventory
@@ -32,12 +32,27 @@ export interface Resource {
   contentUtf8?: string;
   contentBase64?: string;
   minify?: boolean;
+  original?: OriginalBody;
+}
+
+/**
+ * The recorded wire body of a resource. Playback serves it untouched while the
+ * editable file and the fields that shape the body still match.
+ */
+export interface OriginalBody {
+  filePath: string;
+  contentSha256: string;
+  contentEncoding?: ContentEncodingType;
+  contentCharset?: string;
+  minify?: boolean;
 }
 
 /**
  * Represents the complete inventory of recorded resources
  */
 export interface Inventory {
+  /** 2: transfer time is wire bytes × 8 / mbps, unedited bodies replay from `original`. Absent: `durationMs`. */
+  formatVersion?: number;
   entryUrl?: string;
   extraUrls?: string[];
   deviceType?: DeviceType;

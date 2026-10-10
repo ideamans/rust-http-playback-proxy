@@ -64,6 +64,18 @@ Two flags that change what the result means — do not pass them casually:
   returning 404. Convenient, but it reintroduces exactly the nondeterminism
   the tool exists to remove. If you use it, say so alongside the results.
 
+### What playback serves
+
+- A resource you have not touched is served **byte for byte as recorded**, in
+  the recorded time.
+- Edit its file under `contents/`, or its `contentEncoding` / `contentCharset`
+  / `minify` in `index.json`, and the body is regenerated from the file. Its
+  transfer time is then `wire bytes × 8 / mbps` — a smaller file arrives
+  sooner, a higher `mbps` models a faster link.
+- That size-aware timing needs an inventory with `"formatVersion": 2`
+  (recorded by 0.11 or later). An older one replays the recorded duration
+  whatever the size: record again before measuring size changes.
+
 ## 5. Read the reference for anything else
 
 ```bash

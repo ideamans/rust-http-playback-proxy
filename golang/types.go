@@ -28,29 +28,69 @@ const (
 
 // Resource represents a single HTTP resource in the inventory
 type Resource struct {
-	Method             string               `json:"method"`
-	URL                string               `json:"url"`
-	TtfbMs             uint64               `json:"ttfbMs"`
-	DurationMs         *uint64              `json:"durationMs,omitempty"`
-	Mbps               *float64             `json:"mbps,omitempty"`
-	StatusCode         *uint16              `json:"statusCode,omitempty"`
-	ErrorMessage       *string              `json:"errorMessage,omitempty"`
-	RawHeaders         map[string]string    `json:"rawHeaders,omitempty"`
-	ContentEncoding    *ContentEncodingType `json:"contentEncoding,omitempty"`
-	ContentTypeMime    *string              `json:"contentTypeMime,omitempty"`
-	ContentCharset     *string              `json:"contentCharset,omitempty"`
-	ContentFilePath    *string              `json:"contentFilePath,omitempty"`
-	ContentUtf8        *string              `json:"contentUtf8,omitempty"`
-	ContentBase64      *string              `json:"contentBase64,omitempty"`
-	Minify             *bool                `json:"minify,omitempty"`
+	Method          string                 `json:"method"`
+	URL             string                 `json:"url"`
+	TtfbMs          uint64                 `json:"ttfbMs"`
+	DurationMs      *uint64                `json:"durationMs,omitempty"`
+	Mbps            *float64               `json:"mbps,omitempty"`
+	StatusCode      *uint16                `json:"statusCode,omitempty"`
+	ErrorMessage    *string                `json:"errorMessage,omitempty"`
+	RawHeaders      map[string]HeaderValue `json:"rawHeaders,omitempty"`
+	ContentEncoding *ContentEncodingType   `json:"contentEncoding,omitempty"`
+	ContentTypeMime *string                `json:"contentTypeMime,omitempty"`
+	ContentCharset  *string                `json:"contentCharset,omitempty"`
+	ContentFilePath *string                `json:"contentFilePath,omitempty"`
+	ContentUtf8     *string                `json:"contentUtf8,omitempty"`
+	ContentBase64   *string                `json:"contentBase64,omitempty"`
+	Minify          *bool                  `json:"minify,omitempty"`
+	Original        *OriginalBody          `json:"original,omitempty"`
+}
+
+// OriginalBody is the recorded wire body of a resource. Playback serves it
+// untouched while the editable file and the fields that shape the body still
+// match what was recorded.
+type OriginalBody struct {
+	FilePath        string               `json:"filePath"`
+	ContentSha256   string               `json:"contentSha256"`
+	ContentEncoding *ContentEncodingType `json:"contentEncoding,omitempty"`
+	ContentCharset  *string              `json:"contentCharset,omitempty"`
+	Minify          *bool                `json:"minify,omitempty"`
+}
+
+// HeaderValue is a recorded header: a single string, or an array of strings
+// for headers that appeared more than once (Set-Cookie).
+type HeaderValue []string
+
+func (h *HeaderValue) UnmarshalJSON(data []byte) error {
+	var single string
+	if err := json.Unmarshal(data, &single); err == nil {
+		*h = HeaderValue{single}
+		return nil
+	}
+	var multiple []string
+	if err := json.Unmarshal(data, &multiple); err != nil {
+		return err
+	}
+	*h = HeaderValue(multiple)
+	return nil
+}
+
+func (h HeaderValue) MarshalJSON() ([]byte, error) {
+	if len(h) == 1 {
+		return json.Marshal(h[0])
+	}
+	return json.Marshal([]string(h))
 }
 
 // Inventory represents the complete inventory of recorded resources
 type Inventory struct {
-	EntryURL   *string     `json:"entryUrl,omitempty"`
-	ExtraURLs  []string    `json:"extraUrls,omitempty"`
-	DeviceType *DeviceType `json:"deviceType,omitempty"`
-	Resources  []Resource  `json:"resources"`
+	// FormatVersion 2: transfer time is wire bytes × 8 / mbps and unedited
+	// bodies replay from Original. Absent: transfer time is DurationMs.
+	FormatVersion *uint32     `json:"formatVersion,omitempty"`
+	EntryURL      *string     `json:"entryUrl,omitempty"`
+	ExtraURLs     []string    `json:"extraUrls,omitempty"`
+	DeviceType    *DeviceType `json:"deviceType,omitempty"`
+	Resources     []Resource  `json:"resources"`
 }
 
 // LoadInventory loads an inventory from a JSON file

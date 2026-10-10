@@ -11,7 +11,8 @@
 
 - **録画モード**: MITM ProxyとしてHTTP/HTTPSトラフィックをタイミングメタデータ付きでキャプチャ
 - **再生モード**: 録画したトラフィックをTTFBと転送時間を正確にシミュレートして再生
-- **コンテンツ処理**: Minify化されたHTML/CSS/JSを自動的にBeautify化して編集可能に
+- **正確な再生**: 編集していないリソースは記録したバイト列をそのまま配信し、転送時間は本文のサイズに比例する（`転送バイト数 × 8 / mbps`）。ファイルを小さくすればその分早く届く
+- **コンテンツ処理**: Minify化されたJS/CSSは編集用に整形（swc / lightningcss）し、同じパーサで再Minify。HTMLは記録したまま保存
 - **HTTPS対応**: 自己署名証明書を使用した透過的なHTTPSプロキシ
 - **タイミング精度**: TTFBと転送時間を±10%の精度で再現
 - **マルチプラットフォーム**: macOS (ARM64/x86_64)、Linux (x86_64/ARM64)、Windows (x86_64)対応
@@ -304,7 +305,7 @@ for (const [i, resource] of inventory.resources.entries()) {
 - **ランタイム**: Tokio非同期ランタイムで並行リクエスト処理
 - **HTTPスタック**: Hyper 1.0, Hyper-util, Tower/Tower-http
 - **MITM Proxy**: Hudsucker 0.24 + rcgen-caで自己署名証明書
-- **コンテンツ処理**: 自動Beautify化 (prettyish-html, prettify-js)
+- **コンテンツ処理**: 整形とMinifyにswc（JS）とlightningcss（CSS）を使用。HTMLは整形しない
 - **圧縮**: gzip, deflate, brotli, zstd対応 (flate2, brotli, zstdクレート)
 - **エンコーディング**: 文字セット検出とUTF-8変換 (encoding_rs)
 
@@ -388,7 +389,7 @@ make test-content             # コンテンツBeautify化テスト
 - 実行時間: 約60-90秒
 
 **Content Beautificationテスト** (`e2e/content/`):
-- 録画時にMinify化されたHTML/CSS/JSがBeautify化されることを検証
+- 録画時にMinify化されたCSS/JSがBeautify化され、HTMLは記録したまま保存されることを検証
 - inventoryの`minify: true`フラグをチェック
 - PageSpeed最適化のためにコンテンツが編集可能であることを保証
 - 実行時間: 約10秒
@@ -496,7 +497,7 @@ cargo build --release        # リリースビルド
 **録画:**
 - Hudsuckerによる自己署名証明書を使用したMITMプロキシ
 - リクエスト/レスポンス相関のための接続単位のFIFOキュー
-- 自動コンテンツBeautify化 (Minify化されたHTML/CSS/JS)
+- 自動コンテンツBeautify化 (Minify化されたJS/CSS。HTMLは記録したまま)
 - 複数値ヘッダー対応 (例: Set-Cookie)
 - UTF-8変換と文字セット検出
 
@@ -504,7 +505,7 @@ cargo build --release        # リリースビルド
 - 正確なタイミング制御 (TTFBと転送時間の±10%精度)
 - ターゲット時間でのチャンクベースのレスポンスストリーミング
 - method + host + path + queryによるトランザクションマッチング
-- 自動再Minify化と再エンコード
+- 編集していない本文はバイト単位でそのまま再生、編集したものは再Minify化と再エンコード
 
 **テスタビリティ:**
 - トレイトベースの依存性注入 (FileSystem, TimeProvider)

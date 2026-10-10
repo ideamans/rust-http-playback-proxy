@@ -1,5 +1,5 @@
 use crate::traits::{FileSystem, TimeProvider};
-use crate::types::{ContentEncodingType, Inventory, Resource};
+use crate::types::{ContentEncodingType, Inventory, OriginalBody, Resource};
 use crate::utils::{
     extract_charset_from_content_type, extract_charset_from_css, extract_charset_from_html,
     generate_file_path_from_url, is_text_resource,
@@ -16,6 +16,7 @@ use tracing::{error, info};
 /// This allows us to keep proxy runtime overhead minimal for accurate timing
 pub struct BatchProcessor<F: FileSystem, T: TimeProvider> {
     contents_dir: PathBuf,
+    originals_dir: PathBuf,
     file_system: Arc<F>,
     _time_provider: Arc<T>,
 }
@@ -23,8 +24,10 @@ pub struct BatchProcessor<F: FileSystem, T: TimeProvider> {
 impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
     pub fn new(inventory_dir: PathBuf, file_system: Arc<F>, time_provider: Arc<T>) -> Self {
         let contents_dir = inventory_dir.join("contents");
+        let originals_dir = inventory_dir.join("originals");
         Self {
             contents_dir,
+            originals_dir,
             file_system,
             _time_provider: time_provider,
         }
@@ -38,6 +41,9 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
     /// - Beautifying minified content
     /// - Saving to content files
     pub async fn process_all(&self, inventory: &mut Inventory) -> Result<()> {
+        // Everything written below follows the current format: precise mbps,
+        // originals for unedited replay, HTML kept as recorded.
+        inventory.format_version = Some(crate::types::CURRENT_FORMAT_VERSION);
         info!(
             "Batch processing {} resources...",
             inventory.resources.len()
@@ -79,7 +85,7 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
             .map(is_text_resource)
             .unwrap_or(false);
 
-        if is_text {
+        let saved = if is_text {
             // Extract and save charset from Content-Type for text resources
             if let Some(content_type_header) = resource
                 .raw_headers
@@ -105,26 +111,66 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
             }
 
             // Try to process as text, fallback to binary if it fails
-            if let Err(e) = self
+            match self
                 .process_text_resource(resource, &decompressed_body)
                 .await
             {
-                tracing::warn!(
-                    "Failed to process as text resource ({}), falling back to binary: {}",
-                    resource.url,
-                    e
-                );
-                self.process_binary_resource(resource, &decompressed_body)
-                    .await?;
+                Ok(saved) => saved,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to process as text resource ({}), falling back to binary: {}",
+                        resource.url,
+                        e
+                    );
+                    self.process_binary_resource(resource, &decompressed_body)
+                        .await?
+                }
             }
         } else {
             self.process_binary_resource(resource, &decompressed_body)
-                .await?;
-        }
+                .await?
+        };
+
+        self.save_original(resource, &raw_body, &saved).await?;
 
         // Clear raw_body to free memory after processing
         resource.raw_body = None;
 
+        Ok(())
+    }
+
+    /// Keep the body exactly as it crossed the wire whenever the editable file
+    /// differs from it (decompressed, converted to UTF-8 or reformatted), together
+    /// with what playback needs to tell whether the resource has been edited since.
+    async fn save_original(
+        &self,
+        resource: &mut Resource,
+        raw_body: &[u8],
+        saved: &[u8],
+    ) -> Result<()> {
+        if raw_body == saved {
+            // The editable file is the wire body; serving it is already exact.
+            return Ok(());
+        }
+        let Some(content_path) = resource.content_file_path.as_deref() else {
+            return Ok(());
+        };
+        let relative = content_path
+            .strip_prefix("contents/")
+            .unwrap_or(content_path);
+        let full_path = self.originals_dir.join(relative);
+        if let Some(parent) = full_path.parent() {
+            self.file_system.create_dir_all(parent).await?;
+        }
+        self.file_system.write(&full_path, raw_body).await?;
+
+        resource.original = Some(OriginalBody {
+            file_path: format!("originals/{}", relative),
+            content_sha256: crate::utils::sha256_hex(saved),
+            content_encoding: resource.content_encoding.clone(),
+            content_charset: resource.content_charset.clone(),
+            minify: resource.minify,
+        });
         Ok(())
     }
 
@@ -159,7 +205,7 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
         }
     }
 
-    async fn process_text_resource(&self, resource: &mut Resource, body: &[u8]) -> Result<()> {
+    async fn process_text_resource(&self, resource: &mut Resource, body: &[u8]) -> Result<Vec<u8>> {
         // Convert to UTF-8 (content_charset already saved in process_resource)
         let (utf8_content, _detected_encoding) =
             self.convert_to_utf8(body, &resource.content_charset);
@@ -211,15 +257,16 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
         // Store path relative to inventory dir (with "contents/" prefix)
         resource.content_file_path = Some(format!("contents/{}", file_path));
 
-        Ok(())
+        Ok(content_to_save.into_bytes())
     }
 
-    async fn process_binary_resource(&self, resource: &mut Resource, body: &[u8]) -> Result<()> {
-        // Save binary content as base64
-        use base64::{Engine as _, engine::general_purpose};
-        resource.content_base64 = Some(general_purpose::STANDARD.encode(body));
-
-        // Also save to file
+    async fn process_binary_resource(
+        &self,
+        resource: &mut Resource,
+        body: &[u8],
+    ) -> Result<Vec<u8>> {
+        // The file is the only copy: an inline base64 duplicate would go stale
+        // the moment the file is edited, and bloats index.json.
         let file_path = generate_file_path_from_url(&resource.url, &resource.method)?;
         let full_path = self.contents_dir.join(&file_path);
 
@@ -231,7 +278,7 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
         // Store path relative to inventory dir (with "contents/" prefix)
         resource.content_file_path = Some(format!("contents/{}", file_path));
 
-        Ok(())
+        Ok(body.to_vec())
     }
 
     fn convert_to_utf8(&self, body: &[u8], charset: &Option<String>) -> (String, &'static str) {
@@ -247,7 +294,9 @@ impl<F: FileSystem, T: TimeProvider> BatchProcessor<F, T> {
 
     fn beautify_content(&self, content: &str, mime_type: &Option<String>) -> Result<String> {
         match mime_type.as_deref() {
-            Some("text/html") => crate::beautify::format_html(content),
+            // HTML is kept as recorded. Re-serialising the DOM changes whitespace
+            // between inline elements, character references and <pre> blocks, so
+            // a pretty-printed copy is not the same document.
             Some("application/javascript") | Some("text/javascript") => {
                 crate::beautify::format_javascript(content)
             }

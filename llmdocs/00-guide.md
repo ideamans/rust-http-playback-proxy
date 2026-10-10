@@ -26,6 +26,25 @@ are running.
 5. **Unmatched requests 404 by default.** That is deliberate: a silent
    fall-through to the network would make the replay non-deterministic.
    `--passthrough` forwards them instead, at the cost of that guarantee.
+6. **An unedited resource is replayed byte for byte.** The recorder keeps the
+   body exactly as it crossed the wire under `originals/`, with the SHA-256 of
+   the editable file under `contents/`. While that file, `contentEncoding`,
+   `contentCharset` and `minify` are unchanged, playback serves the recorded
+   bytes and headers. Change any of them and the body is regenerated from the
+   editable file: re-minified with a real parser if `minify` is true,
+   re-encoded to `contentCharset`, compressed with `contentEncoding`, with the
+   `Content-Encoding` header rewritten to match.
+7. **Transfer time follows the bytes.** In an inventory with
+   `"formatVersion": 2`, a body takes `wire bytes × 8 / mbps`, where `mbps` was
+   measured from the recorded wire bytes and the download time in microseconds.
+   An unedited body therefore takes exactly the recorded time; a smaller file
+   arrives sooner; a higher `mbps` models a faster link. Inventories without
+   `formatVersion` (recorded before 0.11) replay the recorded `durationMs`
+   whatever the size — record again to get size-aware timing.
+8. **HTML is stored as recorded.** Minified JavaScript and CSS are stored
+   reformatted (swc, lightningcss) for editing and minified again with the same
+   parsers; HTML is never reformatted, because re-serialising a document changes
+   whitespace between inline elements, character references and `<pre>`.
 
 ## Commands
 
@@ -80,6 +99,8 @@ site does not.
 | everything 404s during playback | requests do not match what was recorded | expected for URLs that were never recorded — `--passthrough` if you accept the loss of determinism |
 | the port is already in use | another instance, or the port is taken | omit `-p` to auto-detect from 18080 |
 | the replay is much faster than reality | `--full-throttle` was passed | drop it; timing reproduction is the point |
+| shrinking a file does not shorten its transfer | the inventory has no `formatVersion` (recorded before 0.11) | record again |
+| a regenerated body is larger than the recorded one | compression levels differ from the origin's | expected for edited resources; unedited ones are served as recorded |
 | the recording is noisy or slow | third-party beacons | `-x` with a regex for them |
 | HTTPS pages fail to record | the browser does not trust the proxy CA | this is a MITM proxy; the client has to accept its certificate |
 

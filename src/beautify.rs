@@ -5,6 +5,18 @@ use std::default::Default;
 
 /// Format JavaScript code using swc
 pub fn format_javascript(input: &str) -> Result<String> {
+    emit_javascript(input, false)
+}
+
+/// Minify JavaScript with the same parser that formatted it, so that the
+/// replayed script is the formatted one with whitespace removed and nothing
+/// else changed. Never joins lines textually: automatic semicolon insertion,
+/// trailing `//` comments and template literals stay intact.
+pub fn minify_javascript(input: &str) -> Result<String> {
+    emit_javascript(input, true)
+}
+
+fn emit_javascript(input: &str, minify: bool) -> Result<String> {
     use swc_common::{FileName, GLOBALS, SourceMap, sync::Lrc};
     use swc_ecma_codegen::{Config, Emitter, text_writer::JsWriter};
     use swc_ecma_parser::{EsSyntax, Parser, StringInput, Syntax, lexer::Lexer};
@@ -25,20 +37,25 @@ pub fn format_javascript(input: &str) -> Result<String> {
             None,
         );
         let mut parser = Parser::new_from(lexer);
-        let module = parser
-            .parse_module()
+        // A program, not a module: classic scripts are not strict mode, and
+        // parsing them as modules would reject or reinterpret valid code.
+        let program = parser
+            .parse_program()
             .map_err(|e| anyhow::anyhow!("Failed to parse JavaScript: {:?}", e))?;
+        if let Some(e) = parser.take_errors().into_iter().next() {
+            return Err(anyhow::anyhow!("Failed to parse JavaScript: {:?}", e));
+        }
 
         let mut buf = Vec::new();
         let writer = JsWriter::new(cm.clone(), "\n", &mut buf, None);
         let mut emitter = Emitter {
-            cfg: Config::default(),
+            cfg: Config::default().with_minify(minify),
             comments: None,
             cm: cm.clone(),
             wr: writer,
         };
         emitter
-            .emit_module(&module)
+            .emit_program(&program)
             .map_err(|e| anyhow::anyhow!("Failed to emit JavaScript: {:?}", e))?;
 
         Ok(String::from_utf8(buf)?)
@@ -48,6 +65,15 @@ pub fn format_javascript(input: &str) -> Result<String> {
 /// Format CSS code using lightningcss
 /// Note: Preserves @charset declaration as it's removed during parsing
 pub fn format_css(input: &str) -> Result<String> {
+    print_css(input, false)
+}
+
+/// Minify CSS with the same parser that formatted it.
+pub fn minify_css(input: &str) -> Result<String> {
+    print_css(input, true)
+}
+
+fn print_css(input: &str, minify: bool) -> Result<String> {
     use lightningcss::printer::PrinterOptions;
     use lightningcss::stylesheet::{ParserOptions, StyleSheet};
 
@@ -61,7 +87,7 @@ pub fn format_css(input: &str) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("Failed to parse CSS: {:?}", e))?;
     let out = sheet
         .to_css(PrinterOptions {
-            minify: false,
+            minify,
             ..Default::default()
         })
         .map_err(|e| anyhow::anyhow!("Failed to format CSS: {:?}", e))?;
@@ -74,7 +100,6 @@ pub fn format_css(input: &str) -> Result<String> {
     }
 }
 
-/// Format HTML code using html5ever with pretty printing
 pub fn format_html(input: &str) -> Result<String> {
     use html5ever::parse_document;
 

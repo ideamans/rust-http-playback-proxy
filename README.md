@@ -11,7 +11,8 @@ An MITM HTTP/HTTPS proxy for recording and replaying web traffic with precise ti
 
 - **Recording Mode**: Capture HTTP/HTTPS traffic as MITM proxy with timing metadata
 - **Playback Mode**: Replay recorded traffic with accurate TTFB and transfer duration simulation
-- **Content Processing**: Automatic beautification of minified HTML/CSS/JS for editability
+- **Accurate Replay**: Unedited resources are served byte for byte as recorded; transfer time follows the body size (`wire bytes × 8 / mbps`), so an edited, smaller file arrives sooner
+- **Content Processing**: Minified JS/CSS are reformatted for editing (swc / lightningcss) and minified again with the same parsers; HTML is kept as recorded
 - **HTTPS Support**: Transparent HTTPS proxy using self-signed certificates
 - **Timing Accuracy**: ±10% timing precision for TTFB and transfer duration
 - **Multi-Platform**: Supports macOS (ARM64/x86_64), Linux (x86_64/ARM64), Windows (x86_64)
@@ -304,7 +305,7 @@ See [typescript/README.md](typescript/README.md) for full API documentation.
 - **Runtime**: Tokio async runtime for concurrent request handling
 - **HTTP Stack**: Hyper 1.0, Hyper-util, Tower/Tower-http
 - **MITM Proxy**: Hudsucker 0.24 with rcgen-ca for self-signed certificates
-- **Content Processing**: Automatic beautification (prettyish-html, prettify-js)
+- **Content Processing**: swc (JS) and lightningcss (CSS) for formatting and minifying; HTML is not reformatted
 - **Compression**: gzip, deflate, brotli, zstd support (flate2, brotli, zstd crates)
 - **Encoding**: Charset detection and UTF-8 conversion (encoding_rs)
 
@@ -388,7 +389,7 @@ make test-content             # Content beautification test
 - Runtime: ~60-90 seconds
 
 **Content Beautification Test** (`e2e/content/`):
-- Verifies minified HTML/CSS/JS are beautified during recording
+- Verifies minified CSS/JS are beautified during recording and HTML is stored as recorded
 - Checks `minify: true` flag in inventory
 - Ensures content is editable for PageSpeed optimization
 - Runtime: ~10 seconds
@@ -496,7 +497,7 @@ cargo build --release        # Release build
 **Recording:**
 - MITM proxy using Hudsucker with self-signed certificates
 - Per-connection FIFO queues for request/response correlation
-- Automatic content beautification (minified HTML/CSS/JS)
+- Automatic content beautification (minified JS/CSS; HTML kept as recorded)
 - Multi-value header support (e.g., Set-Cookie)
 - UTF-8 conversion and charset detection
 
@@ -504,7 +505,7 @@ cargo build --release        # Release build
 - Precise timing control (±10% accuracy for TTFB and transfer duration)
 - Chunk-based response streaming with target times
 - Transaction matching by method + host + path + query
-- Automatic re-minification and re-encoding
+- Unedited bodies replayed byte for byte; edited ones re-minified and re-encoded
 
 **Testability:**
 - Trait-based dependency injection (FileSystem, TimeProvider)
