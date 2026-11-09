@@ -440,9 +440,32 @@ Multi-platform build and release process using GitHub Actions:
    - Verifies recording, playback, and timing accuracy
 5. **After PR merge**:
    - Tag Go module: `git tag golang/v0.0.0 && git push origin golang/v0.0.0`
-   - Publish to npm: `cd typescript && npm publish`
+   - Publish to npm: `git tag typescript/vX.Y.Z && git push origin typescript/vX.Y.Z` (`.github/workflows/publish.yml`, npm Trusted Publishing / OIDC, no token; never `npm publish` locally)
 
 See [README.md](README.md#release-workflow) for detailed workflow.
+
+## Publishing to npm
+
+Pushing a `typescript/v*` tag runs `.github/workflows/publish.yml`, which tests, builds and **publishes to npm directly**
+(no staged approval). It authenticates with npm Trusted Publishing (GitHub Actions OIDC); no `NPM_TOKEN` secret is used,
+and provenance is attached automatically.
+
+```bash
+# after bumping "version" in typescript/package.json and pushing the commit
+git tag typescript/vX.Y.Z && git push origin typescript/vX.Y.Z
+```
+
+Push the `typescript/v*` tag only after the update-binaries PR is merged: the plain `v*` tag is cut before the
+binaries and the version bump land on `main`. To publish a merged version without a tag, use workflow_dispatch on `main`.
+
+- The job fails if the tag and the version in typescript/package.json differ, and does nothing if that version is already on npm.
+- A prerelease (`1.2.0-beta.0`) is published under its identifier as the dist-tag (`beta`), not `latest`.
+- Do not `npm publish` from a local machine (no tokens are kept).
+- To re-run without moving the tag, start "Publish to npm" with workflow_dispatch (it publishes the version in typescript/package.json on the chosen branch).
+- A PR that changes `publish.yml` runs the build and `npm pack --dry-run` without publishing.
+- `repository` in package.json must point at this repository: provenance verification compares them and a mismatch fails the publish with `E422` (the workflow checks it first).
+- Prerequisite: on npmjs.com, `rust-http-playback-proxy` lists GitHub Actions / `ideamans/rust-http-playback-proxy` / `publish.yml` with the **publish** permission as its
+  Trusted Publisher. With only the stage-publish permission, `npm publish` fails with `E403 OIDC permission denied`.
 
 ## Signal Handling Design
 

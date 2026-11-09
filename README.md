@@ -440,7 +440,7 @@ Multi-platform automated release:
 6. Run Acceptance:      Test all platforms (acceptance-test.yml)
 7. Merge PR:            After tests pass
 8. Tag Go module:       git tag golang/v0.0.0 && git push
-9. Publish npm:         cd typescript && npm publish
+9. Publish npm:         git tag typescript/vX.Y.Z && git push origin typescript/vX.Y.Z  (CI, Trusted Publishing)
 ```
 
 Supported platforms:
